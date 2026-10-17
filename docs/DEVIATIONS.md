@@ -1,0 +1,21 @@
+# Deviations from the submitted documents
+
+Documents referred to: SRS v4.0, Test Plan v1.1, SAD v1.1. The submitted documents are not edited again; every difference between them and what is built is recorded here and explained at the final demo. Only the Scrum Master (Dev A) edits this file. Team members report a deviation by commenting on their issue with the `deviation` label and stating it in their PR description.
+
+Status: **Confirmed** = decided and in effect. **Candidate** = expected, to be confirmed or dropped by the end of Sprint 2.
+
+| ID | Date | What differs | Document and section | Reason | Impact | Status |
+|---|---|---|---|---|---|---|
+| DEV-01 | 15-10-2026 | Receipt photo attach/view (SEBM-F-012, story S2-12) is built by Dev D and independently verified by Dev C. The documents list F-012 under the Transactions module (developed by Dev A, tested by Dev D). | SRS roles table; Test Plan Section 9 | Dev D owns storage and infrastructure work; the rule "whoever built it cannot test it" means Dev C verifies it. | None on behaviour. Test ownership for F-012 differs from the table. | Confirmed |
+| DEV-02 | 15-10-2026 | RBAC (SEBM-SR-005, story S2-03) is a middleware in `backend/src/middleware/rbac.js` built by Dev D and applied to the admin router by Dev B. The SAD places RBAC in the Auth Service. | SAD Sections 3.4 and 3.8 | Dev D owns security configuration; keeps module ownership clean. | None on behaviour; the component that hosts the check differs. | Confirmed |
+| DEV-03 | 15-10-2026 | Web client only; no React Native mobile app. | SAD Sections 3.4, 3.6; SRS Section 2 | One-week sprints; a web client is enough to demonstrate every flow. | Mobile-specific behaviour (camera, push) not demonstrated. | Candidate |
+| DEV-04 | 15-10-2026 | Notification provider is mocked/in-app instead of real push, email or SMS. | SAD Sections 3.4, 3.6; SRS 4.6 | No provider accounts or credentials within the sprint timeline. | Alerts appear in the app and in logs only. | Candidate |
+| DEV-05 | 15-10-2026 | Receipt images stored on local disk (or a stub) instead of AWS S3 / Firebase Storage. | SAD Section 3.6 | No cloud account needed for the demo. | Not production storage. | Candidate |
+| DEV-06 | 15-10-2026 | SEBM-NF-002 (99.5% availability) and SEBM-NF-005 (10,000 concurrent users) are documented with their design basis, not measured. | SRS Section 5 | Cannot be genuinely verified in a one-week student project. | Marked "documented, not load-verified" in the RTM. | Candidate |
+| DEV-07 | 15-10-2026 | Email/OTP verification after registration (shown in SAD sequence diagram 3) is not implemented unless time remains. | SAD Section 4.2 | Not required by SEBM-F-001 acceptance criteria; password reset (F-003) covers the OTP path. | Registered accounts are active immediately. | Candidate |
+| DEV-08 | 15-10-2026 | Stretch stories SEBM-F-042 (period comparison) and SEBM-F-051 (bill reminders) may not be completed. | SRS 4.5, 4.6 | Both are Low priority; scheduled only after core work. | RTM status stays "N" for any not completed. | Candidate |
+
+## Plan notes (not document deviations)
+
+- **Dev D workload** is high in the dry run and Sprint 2. No file changes needed. Agreed triggers: if D-03 is not merged by Monday 19 Oct at noon, move D-04 (CI) to Dev C; if S2-14 has not started by Wednesday 28 Oct, move S2-16 (video, tag, freeze) to Dev B.
+- Any story not verified by the sprint cut-off is listed here as "not verified".
