@@ -7,7 +7,7 @@ Project documents (SRS, SAD, Test Plan) are in `docs/`. The sprint plan is in `S
 ## Prerequisites
 
 - [Git](https://git-scm.com/)
-- [Node.js](https://nodejs.org/) (LTS)
+- [Node.js](https://nodejs.org/) (20)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (runs PostgreSQL locally)
 
 ## Quick start
@@ -24,18 +24,18 @@ cd smart-expense-budget-app
 Make sure Docker Desktop is running, then:
 
 ```bash
-docker compose up -d
+docker compose up -d --wait
 docker compose ps
 ```
 
-Wait until the `db` service shows `healthy`. On first start two databases are created:
+Compose reads overrides from shell environment variables or a `.env` file in the project folder. On first start two databases are created:
 
 | Database | Purpose |
 |---|---|
 | `sebm` | Local development |
 | `sebm_test` | Automated tests (Jest + Supertest) |
 
-Default development connection (override with `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` in your environment):
+Default development connection (override with `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in your shell environment or project `.env` file):
 
 | Setting | Value |
 |---|---|
@@ -45,6 +45,7 @@ Default development connection (override with `POSTGRES_USER`, `POSTGRES_PASSWOR
 | Password | `sebm_dev_password` |
 
 These are local development defaults only. Never commit a `.env` file or real secrets.
+Changing `POSTGRES_PASSWORD` after the database has been initialized does not change the existing database password. Applying a new password requires recreating the database volume with `docker compose down -v`, which deletes all local database data.
 
 ### 3. Verify the databases
 
@@ -52,7 +53,7 @@ These are local development defaults only. Never commit a `.env` file or real se
 docker exec -it sebm-postgres psql -U sebm -c "\l"
 ```
 
-Both `sebm` and `sebm_test` should be listed. Press `q` to leave the pager.
+Replace `sebm` after `-U` with your configured `POSTGRES_USER` if you changed the default. Both `sebm` and `sebm_test` should be listed.
 
 ### 4. Backend and frontend
 
@@ -69,13 +70,15 @@ docker compose logs -f db  # follow database logs
 
 ## Troubleshooting
 
-- **Port 5432 already in use:** another PostgreSQL is running on your machine. Stop it, or change the left side of the `ports` mapping in `docker-compose.yml` (for example `5433:5432`).
-- **`sebm_test` is missing:** the init script only runs on a fresh volume. Run `docker compose down -v` and then `docker compose up -d`.
+- **Port 5432 already in use:** another PostgreSQL is running on your machine. Stop it, or change the left side of the `ports` mapping in `docker-compose.yml` (for example `127.0.0.1:5433:5432`).
+- **`sebm_test` is missing:** create it in the running container with `docker exec -it sebm-postgres psql -U sebm -c "CREATE DATABASE sebm_test;"` (replace `sebm` if you changed `POSTGRES_USER`). The init script only runs on a fresh volume. `docker compose down -v` also recreates it, but permanently deletes your local development data.
 - **`docker` is not recognised:** start Docker Desktop, then open a new terminal.
 
 ## Team workflow
 
-- One issue = one branch = one PR. Branch name: `feature/<issue-number>-<short-name>`, cut from `main`.
-- No direct commits to `main`. The repo owner reviews and merges every PR, and CI must be green first.
+- One issue = one branch = one PR, cut from `main`. Feature branches use `feature/<module>/<issue>-<short-name>`; independent test branches use `test/<module>/<issue>-<short-name>`; bug fixes use `feature/<module>/<bug-issue>-fix-<short-name>`.
+- No direct commits to `main`. Dev A reviews and merges; Dev D reviews Dev A's PRs. Nobody merges their own PR, and CI must be green first.
+- Use the commit-style convention for PR titles (for example, `docs(setup): fix database setup (#15)`) and include `Closes #<issue>` in the PR description.
+- Before merging, rebase on the latest `main` with `git fetch origin` and `git rebase origin/main`. If the branch was already pushed, update it with `git push --force-with-lease`.
 - Commit format: `feat(module): description (#issue)`, also `test(...)`, `fix(...)`, `docs(...)`.
 - Anything that differs from the SRS, SAD or Test Plan is logged in `docs/DEVIATIONS.md`.
