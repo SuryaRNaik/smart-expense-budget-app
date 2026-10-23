@@ -12,6 +12,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
+  jwtSecret: process.env.JWT_SECRET || undefined,
   db: {
     connectionString: process.env.DATABASE_URL || undefined,
     host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
