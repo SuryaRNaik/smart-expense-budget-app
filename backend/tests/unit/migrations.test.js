@@ -139,15 +139,19 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
   describe('Migration Runner (migrate.js)', () => {
     it('executes migrations in deterministic alphabetical order inside transactions', async () => {
       const executedQueries = [];
+      // Inside tests/unit/migrations.test.js (where the mock client is defined)
       const mockClient = {
-        query: jest.fn(async (text, params) => {
-          executedQueries.push({ text: text.trim(), params });
-          if (text.includes('SELECT version FROM schema_migrations')) {
-            return { rows: [] };
+        query: jest.fn(async (text) => {
+          // Only simulate the error if the environment flag is explicitly set
+          if (
+            process.env.SIMULATE_MIGRATION_FAILURE === '1' &&
+            text.toLowerCase().includes('create table if not exists users')
+          ) {
+            throw new Error('Simulated SQL syntax error in migration');
           }
           return { rows: [] };
         }),
-        release: jest.fn(),
+        release: jest.fn()
       };
 
       const mockPool = {
@@ -168,8 +172,27 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     });
 
     it('rolls back and does not record migration if an error occurs during execution', async () => {
-      const executedQueries = [];
-      let insertMigrationAttempted = false;
+          const executedQueries = [];
+          let insertMigrationAttempted = false;
+
+          // Enable the simulation flag specifically for this test
+          process.env.SIMULATE_MIGRATION_FAILURE = '1';
+
+          try {
+            await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
+          } finally {
+            // Ensure the environment flag is always cleared
+            delete process.env.SIMULATE_MIGRATION_FAILURE;
+          }
+
+          // Verify transaction rollback occurred and insert was not attempted
+          const rollbackCalled = mockClient.query.mock.calls.some(call => call[0].toUpperCase() === 'ROLLBACK');
+          expect(rollbackCalled).toBe(true);
+          
+          const insertCalled = mockClient.query.mock.calls.some(call => call[0].includes('schema_migrations'));
+          expect(insertCalled).toBe(false);
+        });
+
 
       const mockClient = {
         query: jest.fn(async (text, params) => {
