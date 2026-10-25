@@ -137,12 +137,6 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
       const mockClient = {
         query: jest.fn(async (text) => {
           executedQueries.push({ text: text.trim() });
-          if (
-            process.env.SIMULATE_MIGRATION_FAILURE === '1' &&
-            text.toLowerCase().includes('create table if not exists users')
-          ) {
-            throw new Error('Simulated SQL syntax error in migration');
-          }
           return { rows: [] };
         }),
         release: jest.fn()
@@ -167,6 +161,7 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     it('rolls back and does not record migration if an error occurs during execution', async () => {
       const executedQueries = [];
       let insertMigrationAttempted = false;
+      let simulateFailure = true;
 
       const mockClient = {
         query: jest.fn(async (text, params) => {
@@ -174,7 +169,7 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
           if (text.includes('SELECT version FROM schema_migrations')) {
             return { rows: [] };
           }
-          if (text.toLowerCase().includes('create table if not exists users')) {
+          if (simulateFailure && text.toLowerCase().includes('create table if not exists users')) {
             throw new Error('Simulated SQL syntax error in migration');
           }
           if (text.includes('INSERT INTO schema_migrations')) {
@@ -189,13 +184,7 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
         connect: jest.fn(async () => mockClient),
       };
 
-      process.env.SIMULATE_MIGRATION_FAILURE = '1';
-
-      try {
-        await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
-      } finally {
-        delete process.env.SIMULATE_MIGRATION_FAILURE;
-      }
+      await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
 
       const rollbackCalled = mockClient.query.mock.calls.some(call => call[0].toUpperCase() === 'ROLLBACK');
       expect(rollbackCalled).toBe(true);
