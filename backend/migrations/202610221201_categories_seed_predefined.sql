@@ -6,19 +6,19 @@
 INSERT INTO categories (user_id, name, type, is_custom)
 VALUES
     -- Predefined Expense Categories
-    (NULL, 'Groceries', 'Expense', FALSE),
-    (NULL, 'Rent', 'Expense', FALSE),
-    (NULL, 'Utilities', 'Expense', FALSE),
-    (NULL, 'Transportation', 'Expense', FALSE),
-    (NULL, 'Healthcare', 'Expense', FALSE),
-    (NULL, 'Entertainment', 'Expense', FALSE),
-    (NULL, 'Dining Out', 'Expense', FALSE),
-    (NULL, 'Shopping', 'Expense', FALSE),
-    (NULL, 'Miscellaneous', 'Expense', FALSE),
+    (NULL, 'Groceries', 'expense', FALSE),
+    (NULL, 'Rent', 'expense', FALSE),
+    (NULL, 'Utilities', 'expense', FALSE),
+    (NULL, 'Transportation', 'expense', FALSE),
+    (NULL, 'Healthcare', 'expense', FALSE),
+    (NULL, 'Entertainment', 'expense', FALSE),
+    (NULL, 'Dining Out', 'expense', FALSE),
+    (NULL, 'Shopping', 'expense', FALSE),
+    (NULL, 'Miscellaneous', 'expense', FALSE),
 
     -- Predefined Income Categories
-    (NULL, 'Salary', 'Income', FALSE),
-    (NULL, 'Freelance', 'Income', FALSE),
-    (NULL, 'Investments', 'Income', FALSE),
-    (NULL, 'Other Income', 'Income', FALSE)
+    (NULL, 'Salary', 'income', FALSE),
+    (NULL, 'Freelance', 'income', FALSE),
+    (NULL, 'Investments', 'income', FALSE),
+    (NULL, 'Other Income', 'income', FALSE)
 ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING;
