@@ -89,13 +89,10 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     it('uses ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING for idempotency', () => {
       const sql = fs.readFileSync(seedMigrationFile, 'utf-8');
       expect(sql).toContain('ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING');
-      // Should not conflict on category_id since category_id is generated dynamically via gen_random_uuid()
       expect(sql).not.toContain('ON CONFLICT (category_id)');
     });
 
     it('simulates and verifies duplicate-seed scenario prevention (unit simulation)', () => {
-      // Unit simulation of the table and unique constraint logic:
-      // uq_categories_user_name_type: UNIQUE NULLS NOT DISTINCT (user_id, name, type)
       const mockDatabase = [];
       let nextId = 1;
 
@@ -113,9 +110,9 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
             type: category.type,
             is_custom: category.is_custom,
           });
-          return true; // inserted
+          return true;
         }
-        return false; // conflict handled with DO NOTHING
+        return false;
       };
 
       const seedRows = [
@@ -124,25 +121,22 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
         { user_id: null, name: 'Utilities', type: 'Expense', is_custom: false },
       ];
 
-      // First run: all rows inserted
       const firstRunResults = seedRows.map(insertWithConflictHandling);
       expect(firstRunResults).toEqual([true, true, true]);
       expect(mockDatabase.length).toBe(3);
 
-      // Second run: attempting duplicate seed with newly generated category IDs
       const secondRunResults = seedRows.map(insertWithConflictHandling);
       expect(secondRunResults).toEqual([false, false, false]);
-      expect(mockDatabase.length).toBe(3); // Count remains 3; no duplicates inserted
+      expect(mockDatabase.length).toBe(3);
     });
   });
 
   describe('Migration Runner (migrate.js)', () => {
     it('executes migrations in deterministic alphabetical order inside transactions', async () => {
       const executedQueries = [];
-      // Inside tests/unit/migrations.test.js (where the mock client is defined)
       const mockClient = {
         query: jest.fn(async (text) => {
-          // Only simulate the error if the environment flag is explicitly set
+          executedQueries.push({ text: text.trim() });
           if (
             process.env.SIMULATE_MIGRATION_FAILURE === '1' &&
             text.toLowerCase().includes('create table if not exists users')
@@ -164,7 +158,6 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
       expect(applied[0]).toBe('202610221200_core_create_tables.sql');
       expect(applied[1]).toBe('202610221201_categories_seed_predefined.sql');
 
-      // Verify transaction management
       const statements = executedQueries.map((q) => q.text);
       expect(statements.filter((s) => s === 'BEGIN').length).toBe(applied.length);
       expect(statements.filter((s) => s === 'COMMIT').length).toBe(applied.length);
@@ -172,27 +165,8 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     });
 
     it('rolls back and does not record migration if an error occurs during execution', async () => {
-          const executedQueries = [];
-          let insertMigrationAttempted = false;
-
-          // Enable the simulation flag specifically for this test
-          process.env.SIMULATE_MIGRATION_FAILURE = '1';
-
-          try {
-            await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
-          } finally {
-            // Ensure the environment flag is always cleared
-            delete process.env.SIMULATE_MIGRATION_FAILURE;
-          }
-
-          // Verify transaction rollback occurred and insert was not attempted
-          const rollbackCalled = mockClient.query.mock.calls.some(call => call[0].toUpperCase() === 'ROLLBACK');
-          expect(rollbackCalled).toBe(true);
-          
-          const insertCalled = mockClient.query.mock.calls.some(call => call[0].includes('schema_migrations'));
-          expect(insertCalled).toBe(false);
-        });
-
+      const executedQueries = [];
+      let insertMigrationAttempted = false;
 
       const mockClient = {
         query: jest.fn(async (text, params) => {
@@ -215,10 +189,16 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
         connect: jest.fn(async () => mockClient),
       };
 
-      await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
+      process.env.SIMULATE_MIGRATION_FAILURE = '1';
 
-      const statements = executedQueries.map((q) => q.text);
-      expect(statements).toContain('ROLLBACK');
+      try {
+        await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
+      } finally {
+        delete process.env.SIMULATE_MIGRATION_FAILURE;
+      }
+
+      const rollbackCalled = mockClient.query.mock.calls.some(call => call[0].toUpperCase() === 'ROLLBACK');
+      expect(rollbackCalled).toBe(true);
       expect(insertMigrationAttempted).toBe(false);
       expect(mockClient.release).toHaveBeenCalled();
     });
