@@ -12,24 +12,22 @@ describe('Backend Scaffold & Routing (Integration)', () => {
   });
 
   it('mounts all required modular monolith routers under /api', async () => {
-    // Each scaffolded router is mounted. Without specific endpoints added yet,
-    // requests to these module paths will hit the 404 handler cleanly with standard envelope.
-    const modulePrefixes = [
-      '/api/auth',
-      '/api/transactions',
-      '/api/budgets',
-      '/api/accounts',
-      '/api/reports',
-      '/api/notifications',
-      '/api/admin',
-      '/api/receipts',
+    const moduleRoutes = [
+      { prefix: '/api/auth', status: 404 },
+      { prefix: '/api/transactions', status: 401 },
+      { prefix: '/api/budgets', status: 404 },
+      { prefix: '/api/accounts', status: 401 },
+      { prefix: '/api/reports', status: 404 },
+      { prefix: '/api/notifications', status: 404 },
+      { prefix: '/api/admin', status: 404 },
+      { prefix: '/api/receipts', status: 404 },
     ];
 
-    for (const prefix of modulePrefixes) {
+    for (const { prefix, status } of moduleRoutes) {
       const response = await request(app).get(prefix);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(status);
       expect(response.body).toHaveProperty('error');
-      expect(response.body.error.code).toBe('NOT_FOUND');
+      expect(response.body.error.code).toBe(status === 401 ? 'MISSING_AUTHORIZATION' : 'NOT_FOUND');
     }
   });
 });
