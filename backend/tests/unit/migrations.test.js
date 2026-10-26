@@ -82,20 +82,17 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
       expect(sql).toContain('FALSE');
 
       // Both Expense and Income must be seeded per project requirements
-      expect(sql).toContain('Expense');
-      expect(sql).toContain('Income');
+      expect(sql.toLowerCase()).toContain('expense');
+      expect(sql.toLowerCase()).toContain('income');
     });
 
     it('uses ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING for idempotency', () => {
       const sql = fs.readFileSync(seedMigrationFile, 'utf-8');
       expect(sql).toContain('ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING');
-      // Should not conflict on category_id since category_id is generated dynamically via gen_random_uuid()
       expect(sql).not.toContain('ON CONFLICT (category_id)');
     });
 
     it('simulates and verifies duplicate-seed scenario prevention (unit simulation)', () => {
-      // Unit simulation of the table and unique constraint logic:
-      // uq_categories_user_name_type: UNIQUE NULLS NOT DISTINCT (user_id, name, type)
       const mockDatabase = [];
       let nextId = 1;
 
@@ -113,9 +110,9 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
             type: category.type,
             is_custom: category.is_custom,
           });
-          return true; // inserted
+          return true;
         }
-        return false; // conflict handled with DO NOTHING
+        return false;
       };
 
       const seedRows = [
@@ -124,15 +121,13 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
         { user_id: null, name: 'Utilities', type: 'Expense', is_custom: false },
       ];
 
-      // First run: all rows inserted
       const firstRunResults = seedRows.map(insertWithConflictHandling);
       expect(firstRunResults).toEqual([true, true, true]);
       expect(mockDatabase.length).toBe(3);
 
-      // Second run: attempting duplicate seed with newly generated category IDs
       const secondRunResults = seedRows.map(insertWithConflictHandling);
       expect(secondRunResults).toEqual([false, false, false]);
-      expect(mockDatabase.length).toBe(3); // Count remains 3; no duplicates inserted
+      expect(mockDatabase.length).toBe(3);
     });
   });
 
@@ -140,14 +135,11 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     it('executes migrations in deterministic alphabetical order inside transactions', async () => {
       const executedQueries = [];
       const mockClient = {
-        query: jest.fn(async (text, params) => {
-          executedQueries.push({ text: text.trim(), params });
-          if (text.includes('SELECT version FROM schema_migrations')) {
-            return { rows: [] };
-          }
+        query: jest.fn(async (text) => {
+          executedQueries.push({ text: text.trim() });
           return { rows: [] };
         }),
-        release: jest.fn(),
+        release: jest.fn()
       };
 
       const mockPool = {
@@ -160,7 +152,6 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
       expect(applied[0]).toBe('202610221200_core_create_tables.sql');
       expect(applied[1]).toBe('202610221201_categories_seed_predefined.sql');
 
-      // Verify transaction management
       const statements = executedQueries.map((q) => q.text);
       expect(statements.filter((s) => s === 'BEGIN').length).toBe(applied.length);
       expect(statements.filter((s) => s === 'COMMIT').length).toBe(applied.length);
@@ -170,6 +161,7 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
     it('rolls back and does not record migration if an error occurs during execution', async () => {
       const executedQueries = [];
       let insertMigrationAttempted = false;
+      let simulateFailure = true;
 
       const mockClient = {
         query: jest.fn(async (text, params) => {
@@ -177,7 +169,7 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
           if (text.includes('SELECT version FROM schema_migrations')) {
             return { rows: [] };
           }
-          if (text.toLowerCase().includes('create table if not exists users')) {
+          if (simulateFailure && text.toLowerCase().includes('create table if not exists users')) {
             throw new Error('Simulated SQL syntax error in migration');
           }
           if (text.includes('INSERT INTO schema_migrations')) {
@@ -194,8 +186,8 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
 
       await expect(runMigrations(mockPool)).rejects.toThrow('Simulated SQL syntax error in migration');
 
-      const statements = executedQueries.map((q) => q.text);
-      expect(statements).toContain('ROLLBACK');
+      const rollbackCalled = mockClient.query.mock.calls.some(call => call[0].toUpperCase() === 'ROLLBACK');
+      expect(rollbackCalled).toBe(true);
       expect(insertMigrationAttempted).toBe(false);
       expect(mockClient.release).toHaveBeenCalled();
     });

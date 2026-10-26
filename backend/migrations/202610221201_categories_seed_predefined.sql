@@ -1,24 +1,11 @@
--- Migration: 202610221201_categories_seed_predefined.sql
--- Description: Seed predefined expense and income categories per SEBM-F-013 / SPRINT_PLAN.md
--- All predefined categories have user_id = NULL and is_custom = false.
--- Uses ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING to ensure idempotency.
-
-INSERT INTO categories (user_id, name, type, is_custom)
-VALUES
-    -- Predefined Expense Categories
-    (NULL, 'Groceries', 'Expense', FALSE),
-    (NULL, 'Rent', 'Expense', FALSE),
-    (NULL, 'Utilities', 'Expense', FALSE),
-    (NULL, 'Transportation', 'Expense', FALSE),
-    (NULL, 'Healthcare', 'Expense', FALSE),
-    (NULL, 'Entertainment', 'Expense', FALSE),
-    (NULL, 'Dining Out', 'Expense', FALSE),
-    (NULL, 'Shopping', 'Expense', FALSE),
-    (NULL, 'Miscellaneous', 'Expense', FALSE),
-
-    -- Predefined Income Categories
-    (NULL, 'Salary', 'Income', FALSE),
-    (NULL, 'Freelance', 'Income', FALSE),
-    (NULL, 'Investments', 'Income', FALSE),
-    (NULL, 'Other Income', 'Income', FALSE)
+INSERT INTO categories (category_id, user_id, name, type, is_custom)
+VALUES 
+    (gen_random_uuid()::text, NULL, 'Groceries', 'expense', FALSE),
+    (gen_random_uuid()::text, NULL, 'Utilities', 'expense', FALSE),
+    (gen_random_uuid()::text, NULL, 'Rent', 'expense', FALSE),
+    (gen_random_uuid()::text, NULL, 'Dining', 'expense', FALSE),
+    (gen_random_uuid()::text, NULL, 'Transport', 'expense', FALSE),
+    (gen_random_uuid()::text, NULL, 'Salary', 'income', FALSE),
+    (gen_random_uuid()::text, NULL, 'Freelance', 'income', FALSE),
+    (gen_random_uuid()::text, NULL, 'Investments', 'income', FALSE)
 ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING;
