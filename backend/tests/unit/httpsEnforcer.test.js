@@ -49,7 +49,7 @@ describe('HTTPS Enforcer Middleware (Unit)', () => {
       expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('permits loopback HTTP health checks on /health and /api/health', () => {
+    it('permits loopback HTTP health checks on /health, /api/health, and trailing slashes', () => {
       config.enforceHttps = true;
       const next = jest.fn();
 
@@ -65,11 +65,17 @@ describe('HTTPS Enforcer Middleware (Unit)', () => {
         {},
         next
       );
+      // Trailing slash loopback
+      httpsEnforcer(
+        { secure: false, path: '/health/', socket: { remoteAddress: '127.0.0.1' } },
+        {},
+        next
+      );
 
-      expect(next).toHaveBeenCalledTimes(2);
+      expect(next).toHaveBeenCalledTimes(3);
     });
 
-    it('rejects remote HTTP requests to health endpoints', () => {
+    it('rejects remote HTTP requests to health endpoints including trailing slashes', () => {
       config.enforceHttps = true;
       let statusCode = null;
       let responseBody = null;
@@ -86,7 +92,7 @@ describe('HTTPS Enforcer Middleware (Unit)', () => {
       const next = jest.fn();
 
       httpsEnforcer(
-        { secure: false, path: '/health', socket: { remoteAddress: '203.0.113.10' } },
+        { secure: false, path: '/health/', socket: { remoteAddress: '203.0.113.10' } },
         res,
         next
       );
@@ -152,6 +158,33 @@ describe('HTTPS Enforcer Middleware (Unit)', () => {
 
       httpsEnforcer(
         { secure: false, path: '/api/transactions', socket: { remoteAddress: '127.0.0.1' } },
+        res,
+        next
+      );
+
+      expect(next).not.toHaveBeenCalled();
+      expect(statusCode).toBe(403);
+      expect(responseBody.error.code).toBe('HTTPS_REQUIRED');
+    });
+
+    it('rejects requests when socket or remoteAddress is missing and connection is insecure', () => {
+      config.enforceHttps = true;
+      let statusCode = null;
+      let responseBody = null;
+      const res = {
+        status(code) {
+          statusCode = code;
+          return this;
+        },
+        json(data) {
+          responseBody = data;
+          return this;
+        },
+      };
+      const next = jest.fn();
+
+      httpsEnforcer(
+        { secure: false, path: '/health', socket: null },
         res,
         next
       );

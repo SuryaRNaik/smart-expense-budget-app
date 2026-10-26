@@ -5,27 +5,57 @@ const app = require('./app');
 const config = require('./config');
 
 const validateTlsFiles = (certPath, keyPath) => {
-  if (!certPath || !keyPath) {
+  if (
+    !certPath ||
+    typeof certPath !== 'string' ||
+    !certPath.trim() ||
+    !keyPath ||
+    typeof keyPath !== 'string' ||
+    !keyPath.trim()
+  ) {
     throw new Error('TLS configuration error: TLS_CERT_PATH and TLS_KEY_PATH are required when TLS_ENABLED=true.');
   }
-  if (!fs.existsSync(certPath)) {
-    throw new Error(`TLS configuration error: TLS_CERT_PATH file does not exist: ${certPath}`);
+
+  const trimmedCert = certPath.trim();
+  const trimmedKey = keyPath.trim();
+
+  let certStat;
+  try {
+    certStat = fs.statSync(trimmedCert);
+  } catch (err) {
+    throw new Error(`TLS configuration error: TLS_CERT_PATH file does not exist: ${trimmedCert}`);
   }
-  if (!fs.existsSync(keyPath)) {
-    throw new Error(`TLS configuration error: TLS_KEY_PATH file does not exist: ${keyPath}`);
+  if (!certStat.isFile()) {
+    throw new Error(`TLS configuration error: TLS_CERT_PATH path is not a file: ${trimmedCert}`);
+  }
+
+  let keyStat;
+  try {
+    keyStat = fs.statSync(trimmedKey);
+  } catch (err) {
+    throw new Error(`TLS configuration error: TLS_KEY_PATH file does not exist: ${trimmedKey}`);
+  }
+  if (!keyStat.isFile()) {
+    throw new Error(`TLS configuration error: TLS_KEY_PATH path is not a file: ${trimmedKey}`);
   }
 };
 
 const createServer = (appInstance = app, cfg = config) => {
   if (cfg.tls && cfg.tls.enabled) {
     validateTlsFiles(cfg.tls.certPath, cfg.tls.keyPath);
-    const cert = fs.readFileSync(cfg.tls.certPath);
-    const key = fs.readFileSync(cfg.tls.keyPath);
+    const minVersion = cfg.tls.minVersion || 'TLSv1.2';
+    if (minVersion !== 'TLSv1.2' && minVersion !== 'TLSv1.3') {
+      throw new Error(
+        `Invalid TLS minVersion: "${minVersion}". Protocol versions weaker than TLSv1.2 are rejected per AC-SEBM-SR-001.`
+      );
+    }
+    const cert = fs.readFileSync(cfg.tls.certPath.trim());
+    const key = fs.readFileSync(cfg.tls.keyPath.trim());
     return https.createServer(
       {
         cert,
         key,
-        minVersion: cfg.tls.minVersion || 'TLSv1.2',
+        minVersion,
       },
       appInstance
     );

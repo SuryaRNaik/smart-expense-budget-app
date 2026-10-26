@@ -1,4 +1,5 @@
 const path = require('path');
+const net = require('net');
 const dotenv = require('dotenv');
 
 // Load .env from current working directory
@@ -10,6 +11,58 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 /**
+ * Validates whether a single part is a recognized keyword, a valid IPv4/IPv6 address,
+ * or a valid CIDR range with an in-bounds prefix (0-32 for IPv4, 0-128 for IPv6).
+ * Uses Node.js built-in net.isIP to ensure genuine IP syntax.
+ */
+const isValidProxyAddressOrRange = (part) => {
+  if (!part || typeof part !== 'string') return false;
+  const trimmed = part.trim();
+  if (!trimmed) return false;
+
+  const allowedKeywords = ['loopback', 'linklocal', 'uniquelocal'];
+  if (allowedKeywords.includes(trimmed.toLowerCase())) {
+    return true;
+  }
+
+  const slashIndex = trimmed.indexOf('/');
+  if (slashIndex === -1) {
+    // Single IP address (IPv4 or IPv6)
+    return net.isIP(trimmed) !== 0;
+  }
+
+  // Exactly one slash allowed for CIDR notation
+  if (trimmed.indexOf('/', slashIndex + 1) !== -1) {
+    return false;
+  }
+
+  const ip = trimmed.slice(0, slashIndex);
+  const prefixStr = trimmed.slice(slashIndex + 1);
+
+  // Prefix must be digits only without leading signs, decimals, or spaces
+  if (!/^\d+$/.test(prefixStr)) {
+    return false;
+  }
+
+  const ipVersion = net.isIP(ip);
+  if (ipVersion === 0) {
+    return false;
+  }
+
+  const prefix = parseInt(prefixStr, 10);
+  if (ipVersion === 4) {
+    // IPv4 CIDR prefix range: 0 to 32
+    return prefix >= 0 && prefix <= 32;
+  }
+  if (ipVersion === 6) {
+    // IPv6 CIDR prefix range: 0 to 128
+    return prefix >= 0 && prefix <= 128;
+  }
+
+  return false;
+};
+
+/**
  * Parse and validate TRUST_PROXY configuration.
  * Disallows unrestricted TRUST_PROXY=true in production.
  * Accepts:
@@ -17,7 +70,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * - "true" -> true (only allowed in non-production environments)
  * - integer or numeric string (e.g. "1") -> integer hop count
  * - keywords: "loopback", "linklocal", "uniquelocal"
- * - comma-separated list of valid IPs / CIDRs
+ * - comma-separated list of valid IPs / CIDRs (strictly validated via net.isIP)
  */
 const parseTrustProxy = (val, nodeEnv = process.env.NODE_ENV || 'development') => {
   if (val === undefined || val === null || val === '' || val === false) {
@@ -50,28 +103,42 @@ const parseTrustProxy = (val, nodeEnv = process.env.NODE_ENV || 'development') =
 
   // Integer hop count
   if (typeof val === 'number') {
-    if (Number.isInteger(val) && val > 0) return val;
+    if (val === 0) {
+      return false;
+    }
+    if (Number.isSafeInteger(val) && val > 0) {
+      return val;
+    }
     throw new Error(`Invalid TRUST_PROXY hop count: ${val}`);
   }
 
   if (typeof val === 'string' && /^\d+$/.test(val.trim())) {
-    const hopCount = parseInt(val.trim(), 10);
-    if (hopCount > 0) return hopCount;
-    return false;
+    const trimmedVal = val.trim();
+    const num = Number(trimmedVal);
+    if (num === 0) {
+      return false;
+    }
+    if (Number.isSafeInteger(num) && num > 0) {
+      return num;
+    }
+    throw new Error(`Invalid TRUST_PROXY hop count: ${trimmedVal}`);
   }
 
   if (typeof val === 'string') {
     const trimmed = val.trim();
-    const allowedKeywords = ['loopback', 'linklocal', 'uniquelocal'];
-    const parts = trimmed.split(',').map((p) => p.trim());
-    const isValid = parts.every((part) => {
-      if (allowedKeywords.includes(part.toLowerCase())) return true;
-      // IPv4, IPv6, or CIDR (e.g., 127.0.0.1, 10.0.0.0/8, ::1, fe80::/10)
-      return /^([0-9a-fA-F:.]+(\/\d+)?)$/.test(part);
-    });
-
-    if (isValid && parts.length > 0) {
-      return trimmed;
+    if (trimmed.length > 0) {
+      const parts = trimmed.split(',').map((p) => p.trim());
+      const isValid = parts.length > 0 && parts.every((part) => isValidProxyAddressOrRange(part));
+      if (isValid) {
+        const allowedKeywords = ['loopback', 'linklocal', 'uniquelocal'];
+        const normalizedParts = parts.map((part) => {
+          if (allowedKeywords.includes(part.toLowerCase())) {
+            return part.toLowerCase();
+          }
+          return part;
+        });
+        return normalizedParts.join(', ');
+      }
     }
   }
 
@@ -127,6 +194,7 @@ const config = {
   },
   parseTrustProxy,
   parseTlsMinVersion,
+  isValidProxyAddressOrRange,
 };
 
 module.exports = config;

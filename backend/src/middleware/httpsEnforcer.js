@@ -26,7 +26,9 @@ const httpsEnforcer = (req, res, next) => {
     return next();
   }
 
-  const isHealthPath = req.path === '/health' || req.path === '/api/health';
+  const rawPath = typeof req.path === 'string' ? req.path : '';
+  const normalizedPath = rawPath.toLowerCase().replace(/\/+$/, '') || '/';
+  const isHealthPath = normalizedPath === '/health' || normalizedPath === '/api/health';
   const remoteAddress = req.socket && req.socket.remoteAddress;
 
   if (isHealthPath && isLoopbackAddress(remoteAddress)) {

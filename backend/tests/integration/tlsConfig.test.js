@@ -7,7 +7,7 @@ const app = require('../../src/app');
 const server = require('../../src/server');
 
 /**
- * Resolves the path to the openssl CLI binary.
+ * Resolves the path to the openssl CLI binary if present in PATH or common Git install locations.
  */
 const getOpensslBinary = () => {
   try {
@@ -22,20 +22,51 @@ const getOpensslBinary = () => {
   }
 };
 
+/**
+ * Probes whether the current Node/OpenSSL runtime can construct a client SSL context
+ * targeting TLS < 1.2 (TLSv1/TLSv1.1) with appropriate cipher security level.
+ */
+const detectLegacyClientSupport = () => {
+  try {
+    tls.createSecureContext({
+      minVersion: 'TLSv1',
+      maxVersion: 'TLSv1.1',
+      ciphers: 'DEFAULT@SECLEVEL=0',
+    });
+    return { supported: true, ciphers: 'DEFAULT@SECLEVEL=0' };
+  } catch (e1) {
+    try {
+      tls.createSecureContext({
+        minVersion: 'TLSv1',
+        maxVersion: 'TLSv1.1',
+      });
+      return { supported: true, ciphers: undefined };
+    } catch (e2) {
+      return { supported: false, ciphers: undefined };
+    }
+  }
+};
+
 describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
   const opensslBin = getOpensslBinary();
+  const hasOpenssl = Boolean(opensslBin);
+  const legacyClientInfo = detectLegacyClientSupport();
+
+  // Condition-dependent test runners ensure Jest reports skipped tests accurately
+  const itIfOpenssl = hasOpenssl ? it : it.skip;
+  const itIfLegacySupported = hasOpenssl && legacyClientInfo.supported ? it : it.skip;
+
   const tmpDir = os.tmpdir();
   const tmpKeyPath = path.join(tmpDir, `sebm-test-key-${Date.now()}.pem`);
   const tmpCertPath = path.join(tmpDir, `sebm-test-cert-${Date.now()}.pem`);
 
   let httpsServer = null;
   let httpsPort = null;
-  let opensslAvailable = false;
 
   beforeAll((done) => {
-    if (!opensslBin) {
+    if (!hasOpenssl) {
       console.warn(
-        '[TC-Sec-02] OpenSSL binary not found in environment; live socket handshake tests will be skipped with explicit reporting.'
+        '[TC-Sec-02] OpenSSL CLI binary not found in environment. Live socket handshake tests are genuinely skipped.'
       );
       return done();
     }
@@ -46,8 +77,13 @@ describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
         `${opensslBin} req -x509 -newkey rsa:2048 -nodes -sha256 -subj "/CN=localhost" -keyout "${tmpKeyPath}" -out "${tmpCertPath}" -days 1`,
         { stdio: 'pipe' }
       );
-      opensslAvailable = true;
+    } catch (err) {
+      return done(
+        new Error(`[TC-Sec-02] Failed to generate ephemeral test certificate with OpenSSL: ${err.message}`)
+      );
+    }
 
+    try {
       // Start live HTTPS test server with TLS 1.2 hard minimum per AC-SEBM-SR-001
       const testConfig = {
         tls: {
@@ -59,13 +95,19 @@ describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
       };
 
       httpsServer = server.createServer(app, testConfig);
+
+      httpsServer.on('error', (err) => {
+        if (!httpsPort) {
+          done(new Error(`[TC-Sec-02] Failed to start HTTPS test server: ${err.message}`));
+        }
+      });
+
       httpsServer.listen(0, '127.0.0.1', () => {
         httpsPort = httpsServer.address().port;
         done();
       });
     } catch (err) {
-      console.warn('[TC-Sec-02] Failed to generate ephemeral test certificate:', err.message);
-      done();
+      done(new Error(`[TC-Sec-02] Failed to initialize HTTPS test server: ${err.message}`));
     }
   });
 
@@ -79,7 +121,7 @@ describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
       } catch (e) {}
     };
 
-    if (httpsServer) {
+    if (httpsServer && httpsServer.listening) {
       httpsServer.close(() => {
         cleanFiles();
         done();
@@ -102,77 +144,168 @@ describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
     }).toThrow(/TLS_CERT_PATH file does not exist/);
   });
 
-  it('successfully completes a live TLS 1.2 client handshake and receives HTTP response', (done) => {
-    if (!opensslAvailable || !httpsPort) {
-      console.warn('[TC-Sec-02] Skipped: OpenSSL not available for live handshake test.');
-      return done();
-    }
-
-    const socket = tls.connect(
-      {
-        host: '127.0.0.1',
-        port: httpsPort,
-        minVersion: 'TLSv1.2',
-        maxVersion: 'TLSv1.2',
-        rejectUnauthorized: false,
-      },
-      () => {
-        const protocol = socket.getProtocol();
-        expect(protocol).toBe('TLSv1.2');
-
-        // Send HTTP GET request over encrypted socket
-        socket.write('GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n');
-      }
-    );
-
-    let responseData = '';
-    socket.on('data', (chunk) => {
-      responseData += chunk.toString();
-    });
-
-    socket.on('end', () => {
-      expect(responseData).toContain('HTTP/1.1 200 OK');
-      expect(responseData).toContain('"status":"ok"');
-      done();
-    });
-
-    socket.on('error', (err) => {
-      done(err);
-    });
+  it('rejects direct TLS creation with protocol version weaker than TLS 1.2 per AC-SEBM-SR-001', () => {
+    expect(() => {
+      server.createServer(app, {
+        tls: {
+          enabled: true,
+          minVersion: 'TLSv1.1',
+          certPath: __filename,
+          keyPath: __filename,
+        },
+      });
+    }).toThrow(/AC-SEBM-SR-001/);
   });
 
-  it('successfully completes a live TLS 1.3 client handshake when supported', (done) => {
-    if (!opensslAvailable || !httpsPort) {
-      return done();
-    }
+  itIfOpenssl('successfully completes a live TLS 1.2 client handshake and receives HTTP response', (done) => {
+    let settled = false;
+    let socket = null;
 
-    const socket = tls.connect(
-      {
-        host: '127.0.0.1',
-        port: httpsPort,
-        minVersion: 'TLSv1.3',
-        maxVersion: 'TLSv1.3',
-        rejectUnauthorized: false,
-      },
-      () => {
-        const protocol = socket.getProtocol();
-        expect(protocol).toBe('TLSv1.3');
-        socket.end();
-        done();
+    const timer = setTimeout(() => {
+      finish(new Error('TLS 1.2 handshake timed out'));
+    }, 5000);
+
+    const cleanup = () => {
+      if (socket && !socket.destroyed) {
+        socket.destroy();
       }
-    );
+    };
 
-    socket.on('error', (err) => {
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
       done(err);
-    });
+    };
+
+    try {
+      socket = tls.connect(
+        {
+          host: '127.0.0.1',
+          port: httpsPort,
+          minVersion: 'TLSv1.2',
+          maxVersion: 'TLSv1.2',
+          rejectUnauthorized: false,
+        },
+        () => {
+          try {
+            const protocol = socket.getProtocol();
+            expect(protocol).toBe('TLSv1.2');
+
+            // Send HTTP GET request over encrypted socket
+            socket.write('GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n');
+          } catch (err) {
+            finish(err);
+          }
+        }
+      );
+
+      let responseData = '';
+      socket.on('data', (chunk) => {
+        responseData += chunk.toString();
+      });
+
+      socket.on('end', () => {
+        try {
+          expect(responseData).toContain('HTTP/1.1 200 OK');
+          expect(responseData).toContain('"status":"ok"');
+          finish();
+        } catch (err) {
+          finish(err);
+        }
+      });
+
+      socket.on('error', (err) => {
+        finish(err);
+      });
+    } catch (err) {
+      finish(err);
+    }
   });
 
-  it('rejects client handshakes restricted to TLS < 1.2 (AC-SEBM-SR-001)', (done) => {
-    if (!opensslAvailable || !httpsPort) {
-      return done();
-    }
+  itIfOpenssl('successfully completes a live TLS 1.3 client handshake when supported', (done) => {
+    let settled = false;
+    let socket = null;
 
-    let socket;
+    const timer = setTimeout(() => {
+      finish(new Error('TLS 1.3 handshake timed out'));
+    }, 5000);
+
+    const cleanup = () => {
+      if (socket && !socket.destroyed) {
+        socket.destroy();
+      }
+    };
+
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      done(err);
+    };
+
+    try {
+      socket = tls.connect(
+        {
+          host: '127.0.0.1',
+          port: httpsPort,
+          minVersion: 'TLSv1.3',
+          maxVersion: 'TLSv1.3',
+          rejectUnauthorized: false,
+        },
+        () => {
+          try {
+            const protocol = socket.getProtocol();
+            expect(protocol).toBe('TLSv1.3');
+            socket.end();
+            finish();
+          } catch (err) {
+            finish(err);
+          }
+        }
+      );
+
+      socket.on('error', (err) => {
+        finish(err);
+      });
+    } catch (err) {
+      finish(err);
+    }
+  });
+
+  itIfLegacySupported('rejects client handshakes restricted to TLS < 1.2 (AC-SEBM-SR-001)', (done) => {
+    let settled = false;
+    let socket = null;
+    let serverTlsError = null;
+
+    const timer = setTimeout(() => {
+      finish(new Error('Legacy TLS rejection test timed out waiting for server rejection'));
+    }, 5000);
+
+    const cleanup = () => {
+      if (httpsServer) {
+        httpsServer.removeListener('tlsClientError', onTlsClientError);
+      }
+      if (socket && !socket.destroyed) {
+        socket.destroy();
+      }
+    };
+
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      done(err);
+    };
+
+    const onTlsClientError = (err) => {
+      serverTlsError = err;
+    };
+    httpsServer.once('tlsClientError', onTlsClientError);
+
     try {
       socket = tls.connect(
         {
@@ -180,29 +313,44 @@ describe('HTTPS & TLS Configuration (Integration — TC-Sec-02)', () => {
           port: httpsPort,
           minVersion: 'TLSv1',
           maxVersion: 'TLSv1.1',
+          ciphers: legacyClientInfo.ciphers,
           rejectUnauthorized: false,
         },
         () => {
-          // If handshake unexpectedly succeeded, fail test
-          socket.end();
-          done(new Error('Connection on TLS 1.1 should have been rejected by server'));
+          finish(new Error('Security violation: Server accepted connection on TLS < 1.2'));
         }
       );
 
-      socket.on('error', (err) => {
-        // Handshake was rejected by the server because minVersion is TLSv1.2
-        expect(err).toBeDefined();
-        // Server rejects due to no common protocol version (ERR_SSL_NO_PROTOCOLS_AVAILABLE or similar)
-        done();
+      socket.on('error', (clientErr) => {
+        // Defer to allow the server-side tlsClientError event to be processed on the event loop
+        setImmediate(() => {
+          try {
+            // Must NOT be a client-only protocol setup abort
+            expect(clientErr.code).not.toBe('ERR_SSL_NO_PROTOCOLS_AVAILABLE');
+
+            // 1. Observable server-side evidence:
+            // Node https/tls server emits tlsClientError when rejecting unsupported protocol
+            expect(serverTlsError).toBeDefined();
+            expect(
+              serverTlsError.code === 'ERR_SSL_UNSUPPORTED_PROTOCOL' ||
+              /unsupported protocol|protocol version/i.test(serverTlsError.message)
+            ).toBe(true);
+
+            // 2. Observable wire evidence on client:
+            // Server responds with TLS alert 70 (protocol_version alert)
+            expect(
+              clientErr.code === 'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION' ||
+              /alert protocol version|alert number 70|protocol version/i.test(clientErr.message)
+            ).toBe(true);
+
+            finish();
+          } catch (assertionErr) {
+            finish(assertionErr);
+          }
+        });
       });
     } catch (err) {
-      // If the client TLS stack itself blocks legacy TLS < 1.2 initialization:
-      console.log(
-        '[TC-Sec-02] Test runtime crypto layer refuses TLS < 1.2 context creation:',
-        err.message
-      );
-      expect(err).toBeDefined();
-      done();
+      finish(err);
     }
   });
 });
