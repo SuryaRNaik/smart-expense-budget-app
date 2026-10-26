@@ -12,7 +12,10 @@ export function AuthProvider({ children }) {
       isAuthenticated: user !== null,
       setUser,
       setAccessToken,
-      clearUser: () => setUser(null),
+      clearUser: () => {
+        setUser(null);
+        setAccessToken(null);
+      },
     }),
     [accessToken, user],
   );
