@@ -1,10 +1,23 @@
 const express = require('express');
-const accountsRouter = require('./accounts');
+
+const authRouter = require('./auth');
 const transactionsRouter = require('./transactions');
+const budgetsRouter = require('./budgets');
+const accountsRouter = require('./accounts');
+const reportsRouter = require('./reports');
+const notificationsRouter = require('./notifications');
+const adminRouter = require('./admin');
+const receiptsRouter = require('./receipts');
 
 const router = express.Router();
 
-router.use('/accounts', accountsRouter);
+router.use('/auth', authRouter);
 router.use('/transactions', transactionsRouter);
+router.use('/budgets', budgetsRouter);
+router.use('/accounts', accountsRouter);
+router.use('/reports', reportsRouter);
+router.use('/notifications', notificationsRouter);
+router.use('/admin', adminRouter);
+router.use('/receipts', receiptsRouter);
 
 module.exports = router;

@@ -1,67 +1,23 @@
-const accountService = require('./accountService');
+const AccountService = require('./accountService');
+
+const accountService = new AccountService();
 
 const listAccounts = async (req, res, next) => {
   try {
-    const userId = req.query.user_id || req.user?.id || 'user_1';
-    const accounts = accountService.listAccounts(userId);
-    res.json(accounts);
+    const accounts = await accountService.listAccounts(req.user.userId);
+    return res.json({ accounts });
   } catch (error) {
-    next(error);
-  }
-};
-
-const getAccount = async (req, res, next) => {
-  try {
-    const { accountId } = req.params;
-    const account = accountService.getAccountById(accountId);
-    res.json(account);
-  } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 const createAccount = async (req, res, next) => {
   try {
-    const account = accountService.createAccount(req.body);
-    res.status(201).json(account);
+    const account = await accountService.createAccount(req.user.userId, req.body);
+    return res.status(201).json({ account });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-const updateAccount = async (req, res, next) => {
-  try {
-    const account = accountService.updateAccount(req.params.accountId, req.body);
-    res.json(account);
-  } catch (error) {
-    next(error);
-  }
-};
-
-const deleteAccount = async (req, res, next) => {
-  try {
-    const result = accountService.deleteAccount(req.params.accountId);
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-};
-
-const transferFunds = async (req, res, next) => {
-  try {
-    const { from_account_id, to_account_id, amount } = req.body;
-    const result = accountService.transferFunds(from_account_id, to_account_id, amount);
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-};
-
-module.exports = {
-  listAccounts,
-  getAccount,
-  createAccount,
-  updateAccount,
-  deleteAccount,
-  transferFunds,
-};
+module.exports = { listAccounts, createAccount };

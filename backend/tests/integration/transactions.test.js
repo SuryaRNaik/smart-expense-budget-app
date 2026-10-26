@@ -1,49 +1,173 @@
+jest.mock('../../src/db', () => ({
+  query: jest.fn(),
+  getClient: jest.fn(),
+}));
+
 const request = require('supertest');
 const app = require('../../src/app');
-const { resetStore } = require('../../src/store');
+const config = require('../../src/config');
+const db = require('../../src/db');
+const { signTestToken } = require('../../src/auth/jwt');
 
-describe('Transactions API', () => {
-  beforeEach(() => {
-    resetStore();
+const TEST_SECRET = 'transaction-integration-test-secret';
+const originalJwtSecret = config.jwtSecret;
+const authorization = () => `Bearer ${signTestToken('user-123', 'User')}`;
+
+const createClient = (responses) => {
+  const query = jest.fn();
+  for (const response of responses) {
+    query.mockResolvedValueOnce(response);
+  }
+  const release = jest.fn();
+  const client = { query, release };
+  db.getClient.mockResolvedValueOnce(client);
+  return client;
+};
+
+const transactionPayload = (overrides = {}) => ({
+  accountId: 'account-123',
+  categoryId: 'category-expense',
+  amount: 150.25,
+  type: 'Expense',
+  date: '2026-10-20',
+  notes: 'Groceries',
+  ...overrides,
+});
+
+describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
+  beforeAll(() => {
+    config.jwtSecret = TEST_SECRET;
   });
 
-  it('creates and updates a transaction while keeping balances in sync', async () => {
-    const createResponse = await request(app)
+  afterAll(() => {
+    config.jwtSecret = originalJwtSecret;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('creates the transaction and updates its account balance atomically', async () => {
+    const createdAt = new Date('2026-10-20T10:00:00.000Z');
+    const client = createClient([
+      { rows: [] },
+      { rows: [{ account_id: 'account-123', balance: '500.00' }] },
+      { rows: [{ category_id: 'category-expense' }] },
+      {
+        rows: [{
+          transaction_id: 'transaction-123',
+          account_id: 'account-123',
+          category_id: 'category-expense',
+          amount: '150.25',
+          date: '2026-10-20',
+          type: 'Expense',
+          notes: 'Groceries',
+          created_at: createdAt,
+        }],
+      },
+      { rows: [{ balance: '349.75' }] },
+      { rows: [] },
+    ]);
+
+    const response = await request(app)
       .post('/api/transactions')
-      .send({
-        account_id: 'acc_1',
-        category_id: 'cat_1',
-        amount: 75,
-        date: '2026-10-18',
-        type: 'Expense',
-        notes: 'Coffee and lunch',
-      })
+      .set('Authorization', authorization())
+      .send(transactionPayload())
       .expect(201);
 
-    expect(createResponse.body.type).toBe('Expense');
-    expect(createResponse.body.amount).toBe(75);
+    expect(response.body).toMatchObject({
+      transactionId: 'transaction-123',
+      accountId: 'account-123',
+      categoryId: 'category-expense',
+      amount: 150.25,
+      type: 'Expense',
+      date: '2026-10-20',
+      newBalance: 349.75,
+    });
+    expect(client.query.mock.calls.map(([sql]) => sql.trim().split(/\s+/)[0])).toEqual([
+      'BEGIN',
+      'SELECT',
+      'SELECT',
+      'INSERT',
+      'UPDATE',
+      'COMMIT',
+    ]);
+    expect(client.query.mock.calls[1][1]).toEqual(['account-123', 'user-123']);
+    expect(client.query.mock.calls[4][1]).toEqual([-150.25, 'account-123', 'user-123']);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
 
-    const accountResponse = await request(app)
-      .get('/api/accounts/acc_1')
-      .expect(200);
-
-    expect(accountResponse.body.balance).toBe(2425);
-
-    const updateResponse = await request(app)
-      .put(`/api/transactions/${createResponse.body.transaction_id}`)
-      .send({
-        amount: 90,
+  it('lists transactions only for the authenticated user', async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [{
+        transaction_id: 'transaction-123',
+        account_id: 'account-123',
+        category_id: 'category-expense',
+        amount: '15.00',
+        date: '2026-10-20',
         type: 'Expense',
-        notes: 'Team lunch',
-      })
+        notes: 'Coffee',
+        created_at: new Date('2026-10-20T10:00:00.000Z'),
+      }],
+    });
+
+    const response = await request(app)
+      .get('/api/transactions?userId=another-user')
+      .set('Authorization', authorization())
       .expect(200);
 
-    expect(updateResponse.body.amount).toBe(90);
+    expect(response.body.transactions).toHaveLength(1);
+    expect(response.body.transactions[0]).toMatchObject({
+      transactionId: 'transaction-123',
+      accountId: 'account-123',
+      amount: 15,
+      type: 'Expense',
+    });
+    expect(db.query.mock.calls[0][0]).toContain('INNER JOIN accounts');
+    expect(db.query.mock.calls[0][0]).toContain('WHERE accounts.user_id = $1');
+    expect(db.query.mock.calls[0][1]).toEqual(['user-123']);
+  });
 
-    const accountAfterUpdate = await request(app)
-      .get('/api/accounts/acc_1')
-      .expect(200);
+  it('rolls back when the account is not owned by the authenticated user', async () => {
+    const client = createClient([
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+    ]);
 
-    expect(accountAfterUpdate.body.balance).toBe(2410);
+    const response = await request(app)
+      .post('/api/transactions')
+      .set('Authorization', authorization())
+      .send(transactionPayload())
+      .expect(404);
+
+    expect(response.body.error.code).toBe('ACCOUNT_NOT_FOUND');
+    expect(client.query.mock.calls.map(([sql]) => sql.trim())).toEqual([
+      'BEGIN',
+      expect.stringContaining('SELECT'),
+      'ROLLBACK',
+    ]);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects invalid input before opening a database transaction', async () => {
+    const response = await request(app)
+      .post('/api/transactions')
+      .set('Authorization', authorization())
+      .send(transactionPayload({ amount: 0 }))
+      .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(db.getClient).not.toHaveBeenCalled();
+  });
+
+  it('requires authentication', async () => {
+    const response = await request(app)
+      .post('/api/transactions')
+      .send(transactionPayload())
+      .expect(401);
+
+    expect(response.body.error.code).toBe('MISSING_AUTHORIZATION');
+    expect(db.getClient).not.toHaveBeenCalled();
   });
 });

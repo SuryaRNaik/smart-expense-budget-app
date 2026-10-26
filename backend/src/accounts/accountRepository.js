@@ -1,91 +1,42 @@
-const { accounts, makeId } = require('../store');
+const db = require('../db');
+
+const mapAccount = (row) => ({
+  accountId: row.account_id,
+  userId: row.user_id,
+  accountType: row.account_type,
+  accountName: row.account_name,
+  balance: Number(row.balance),
+  createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+});
 
 class AccountRepository {
-  list(userId) {
-    if (!userId) return [...accounts];
-    return accounts.filter((account) => account.user_id === userId);
+  constructor(database = db) {
+    this.db = database;
   }
 
-  findById(accountId) {
-    return accounts.find((account) => account.account_id === accountId);
+  async findByUserId(userId) {
+    const result = await this.db.query(
+      `SELECT account_id, user_id, account_type, account_name, balance, created_at
+       FROM accounts
+       WHERE user_id = $1
+       ORDER BY created_at DESC, account_id ASC`,
+      [userId],
+    );
+
+    return result.rows.map(mapAccount);
   }
 
-  create(data) {
-    const account = {
-      account_id: makeId('acc'),
-      user_id: data.user_id || 'user_1',
-      account_type: data.account_type,
-      account_name: data.account_name,
-      balance: Number(data.balance || 0),
-      created_at: new Date().toISOString(),
-    };
+  async create({ userId, accountType, accountName, openingBalance }) {
+    const result = await this.db.query(
+      `INSERT INTO accounts (user_id, account_type, account_name, balance)
+       VALUES ($1, $2, $3, $4)
+       RETURNING account_id, user_id, account_type, account_name, balance, created_at`,
+      [userId, accountType, accountName, openingBalance],
+    );
 
-    accounts.push(account);
-    return account;
-  }
-
-  update(accountId, changes) {
-    const account = this.findById(accountId);
-    if (!account) return null;
-
-    if (changes.account_type !== undefined) account.account_type = changes.account_type;
-    if (changes.account_name !== undefined) account.account_name = changes.account_name;
-    if (changes.balance !== undefined) account.balance = Number(changes.balance);
-    if (changes.user_id !== undefined) account.user_id = changes.user_id;
-
-    return account;
-  }
-
-  delete(accountId) {
-    const index = accounts.findIndex((account) => account.account_id === accountId);
-    if (index === -1) return false;
-
-    accounts.splice(index, 1);
-    return true;
-  }
-
-  transfer({ fromAccountId, toAccountId, amount }) {
-    const fromAccount = this.findById(fromAccountId);
-    const toAccount = this.findById(toAccountId);
-
-    if (!fromAccount || !toAccount) {
-      const error = new Error('Transfer accounts were not found.');
-      error.code = 'INVALID_TRANSFER';
-      error.statusCode = 404;
-      throw error;
-    }
-
-    if (fromAccountId === toAccountId) {
-      const error = new Error('Source and target accounts must be different.');
-      error.code = 'INVALID_TRANSFER';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      const error = new Error('Transfer amount must be greater than zero.');
-      error.code = 'INVALID_TRANSFER';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (fromAccount.balance < numericAmount) {
-      const error = new Error('Insufficient funds for transfer.');
-      error.code = 'INSUFFICIENT_FUNDS';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    fromAccount.balance = Number((fromAccount.balance - numericAmount).toFixed(2));
-    toAccount.balance = Number((toAccount.balance + numericAmount).toFixed(2));
-
-    return {
-      from_account: fromAccount,
-      to_account: toAccount,
-      amount: numericAmount,
-    };
+    return mapAccount(result.rows[0]);
   }
 }
 
-module.exports = new AccountRepository();
+module.exports = AccountRepository;
+module.exports.mapAccount = mapAccount;

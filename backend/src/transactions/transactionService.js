@@ -1,158 +1,90 @@
-const accountRepository = require('../accounts/accountRepository');
-const transactionRepository = require('./transactionRepository');
+const TransactionRepository = require('./transactionRepository');
 
-const normalizeType = (type) => {
-  if (!type) {
-    const error = new Error('Transaction type is required.');
-    error.code = 'VALIDATION_ERROR';
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const normalized = String(type).trim();
-  if (normalized.toLowerCase() === 'expense') return 'Expense';
-  if (normalized.toLowerCase() === 'income') return 'Income';
-
-  const error = new Error('Transaction type must be either Expense or Income.');
-  error.code = 'VALIDATION_ERROR';
-  error.statusCode = 400;
-  throw error;
+const createError = (code, message, statusCode) => {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
 };
 
+const isValidDate = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const parseAmount = (value) => {
+  if (typeof value !== 'number' && typeof value !== 'string') return NaN;
+  if (typeof value === 'string' && value.trim() === '') return NaN;
+  return Number(value);
+};
+
+const hasAtMostTwoDecimalPlaces = (value) =>
+  /^\d+(?:\.\d{1,2})?$/.test(String(value).trim());
+
 class TransactionService {
-  listTransactions() {
-    return transactionRepository.list();
+  constructor(repository = new TransactionRepository()) {
+    this.repository = repository;
   }
 
-  getTransactionById(transactionId) {
-    const transaction = transactionRepository.findById(transactionId);
-    if (!transaction) {
-      const error = new Error('Transaction not found.');
-      error.code = 'TRANSACTION_NOT_FOUND';
-      error.statusCode = 404;
-      throw error;
-    }
-
-    return transaction;
+  async listTransactions(userId) {
+    return this.repository.findByUserId(userId);
   }
 
-  createTransaction(data) {
-    const requiredFields = ['account_id', 'amount', 'date', 'type'];
-    for (const field of requiredFields) {
-      if (!data || data[field] === undefined || data[field] === null || data[field] === '') {
-        const error = new Error(`Field "${field}" is required.`);
-        error.code = 'VALIDATION_ERROR';
-        error.statusCode = 400;
-        throw error;
-      }
+  async createTransaction(userId, data = {}) {
+    const { accountId, categoryId, date } = data;
+    const amount = parseAmount(data.amount);
+    const type = data.type;
+
+    if (typeof accountId !== 'string' || accountId.trim() === '') {
+      throw createError('VALIDATION_ERROR', 'accountId is required.', 400);
+    }
+    if (typeof categoryId !== 'string' || categoryId.trim() === '') {
+      throw createError('VALIDATION_ERROR', 'categoryId is required.', 400);
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 9999999999.99) {
+      throw createError('VALIDATION_ERROR', 'amount must be a valid positive amount.', 400);
+    }
+    if (!hasAtMostTwoDecimalPlaces(data.amount)) {
+      throw createError('VALIDATION_ERROR', 'amount must have no more than two decimal places.', 400);
+    }
+    if (type !== 'Expense' && type !== 'Income') {
+      throw createError('VALIDATION_ERROR', 'type must be either Expense or Income.', 400);
+    }
+    if (!isValidDate(date)) {
+      throw createError('VALIDATION_ERROR', 'date must be a valid date in YYYY-MM-DD format.', 400);
+    }
+    if (data.notes !== undefined && data.notes !== null && typeof data.notes !== 'string') {
+      throw createError('VALIDATION_ERROR', 'notes must be a string.', 400);
     }
 
-    const numericAmount = Number(data.amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      const error = new Error('Transaction amount must be a valid number greater than zero.');
-      error.code = 'VALIDATION_ERROR';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    const account = accountRepository.findById(data.account_id);
-    if (!account) {
-      const error = new Error('Account not found.');
-      error.code = 'ACCOUNT_NOT_FOUND';
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const type = normalizeType(data.type);
-    const delta = type === 'Expense' ? -numericAmount : numericAmount;
-    if (type === 'Expense' && account.balance < numericAmount) {
-      const error = new Error('Insufficient funds for transaction.');
-      error.code = 'INSUFFICIENT_FUNDS';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    account.balance = Number((account.balance + delta).toFixed(2));
-
-    const transaction = transactionRepository.create({
-      account_id: data.account_id,
-      category_id: data.category_id,
-      amount: numericAmount,
-      date: data.date,
+    const notes = data.notes?.trim() || null;
+    const { transaction, newBalance } = await this.repository.createAndUpdateBalance({
+      userId,
+      accountId: accountId.trim(),
+      categoryId: categoryId.trim(),
+      amount,
       type,
-      notes: data.notes,
+      date,
+      notes,
     });
 
-    return transaction;
-  }
-
-  updateTransaction(transactionId, changes) {
-    const transaction = this.getTransactionById(transactionId);
-    const originalAmount = Number(transaction.amount);
-    const originalType = transaction.type;
-    const nextType = normalizeType(changes.type ?? originalType);
-    const nextAmount = Number(changes.amount ?? originalAmount);
-
-    if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
-      const error = new Error('Transaction amount must be a valid number greater than zero.');
-      error.code = 'VALIDATION_ERROR';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    const account = accountRepository.findById(changes.account_id ?? transaction.account_id);
-    if (!account) {
-      const error = new Error('Account not found.');
-      error.code = 'ACCOUNT_NOT_FOUND';
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const originalDelta = originalType === 'Expense' ? -originalAmount : originalAmount;
-    const nextDelta = nextType === 'Expense' ? -nextAmount : nextAmount;
-    const netBalanceChange = nextDelta - originalDelta;
-
-    if (nextType === 'Expense' && account.balance + netBalanceChange < 0) {
-      const error = new Error('Insufficient funds for transaction update.');
-      error.code = 'INSUFFICIENT_FUNDS';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    account.balance = Number((account.balance - originalDelta + nextDelta).toFixed(2));
-
-    const updated = transactionRepository.update(transactionId, {
-      ...changes,
-      type: nextType,
-      amount: nextAmount,
-    });
-
-    return updated;
-  }
-
-  deleteTransaction(transactionId) {
-    const existing = this.getTransactionById(transactionId);
-    const account = accountRepository.findById(existing.account_id);
-    if (!account) {
-      const error = new Error('Account not found.');
-      error.code = 'ACCOUNT_NOT_FOUND';
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const delta = existing.type === 'Expense' ? -existing.amount : existing.amount;
-    account.balance = Number((account.balance - delta).toFixed(2));
-
-    const deleted = transactionRepository.delete(transactionId);
-    if (!deleted) {
-      const error = new Error('Transaction could not be deleted.');
-      error.code = 'DELETE_FAILED';
-      error.statusCode = 400;
-      throw error;
-    }
-
-    return { deleted: true, transaction_id: transactionId };
+    return {
+      transactionId: transaction.transactionId,
+      accountId: transaction.accountId,
+      categoryId: transaction.categoryId,
+      amount: transaction.amount,
+      type: transaction.type,
+      date: transaction.date,
+      notes: transaction.notes,
+      newBalance,
+      createdAt: transaction.createdAt,
+    };
   }
 }
 
-module.exports = new TransactionService();
+module.exports = TransactionService;
+module.exports.createError = createError;
+module.exports.hasAtMostTwoDecimalPlaces = hasAtMostTwoDecimalPlaces;
+module.exports.isValidDate = isValidDate;
+module.exports.parseAmount = parseAmount;
