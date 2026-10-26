@@ -18,7 +18,7 @@ describe('POST /api/budgets', () => {
 
     const catRes = await pool.query(
       `INSERT INTO categories (user_id, name, type) 
-       VALUES ($1, 'Test Groceries', 'Expense') 
+       VALUES ($1, 'Test Groceries', 'expense') 
        RETURNING category_id;`,
       [testUserId]
     );
