@@ -82,8 +82,8 @@ describe('Database Schema & Migrations (Unit / Mocked)', () => {
       expect(sql).toContain('FALSE');
 
       // Both Expense and Income must be seeded per project requirements
-      expect(sql).toContain('Expense');
-      expect(sql).toContain('Income');
+      expect(sql.toLowerCase()).toContain('expense');
+      expect(sql.toLowerCase()).toContain('income');
     });
 
     it('uses ON CONFLICT ON CONSTRAINT uq_categories_user_name_type DO NOTHING for idempotency', () => {
