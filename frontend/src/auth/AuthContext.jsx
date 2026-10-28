@@ -4,14 +4,20 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
   const value = useMemo(
     () => ({
       user,
+      accessToken,
       isAuthenticated: user !== null,
       setUser,
-      clearUser: () => setUser(null),
+      setAccessToken,
+      clearUser: () => {
+        setUser(null);
+        setAccessToken(null);
+      },
     }),
-    [user],
+    [accessToken, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
