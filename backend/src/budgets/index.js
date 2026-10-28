@@ -3,13 +3,12 @@ const { getPool } = require('../db');
 const { authenticateToken } = require('../auth/jwt');
 
 const router = express.Router();
-router.use(authenticateToken);
 
 /**
  * POST /api/budgets
  * Creates a new budget entry for the authenticated user.
  */
-router.post('/', async (req, res, next) => {
+router.post('/', authenticateToken, async (req, res, next) => {
   try {
     const user_id = req.user.userId;
 
@@ -79,7 +78,7 @@ router.post('/', async (req, res, next) => {
  * GET /api/budgets/progress
  * Returns budget progress (spent vs limit) dynamically calculated from transactions table.
  */
-router.get('/progress', async (req, res, next) => {
+router.get('/progress', authenticateToken, async (req, res, next) => {
   try {
     const user_id = req.user.userId;
 
