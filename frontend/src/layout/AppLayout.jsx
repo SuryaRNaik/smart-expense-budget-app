@@ -5,6 +5,7 @@ const navigation = [
   { to: '/', label: 'Overview', end: true },
   { to: '/accounts', label: 'Accounts' },
   { to: '/transactions', label: 'Transactions' },
+  { to: '/budgets', label: 'Budgets' },
 ];
 
 export function AppLayout() {
@@ -30,12 +31,20 @@ export function AppLayout() {
             </NavLink>
           ))}
           {!isAuthenticated && (
-            <NavLink
-              to="/login"
-              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-            >
-              Sign in
-            </NavLink>
+            <>
+              <NavLink
+                to="/login"
+                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+              >
+                Sign in
+              </NavLink>
+              <NavLink
+                to="/register"
+                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+              >
+                Create account
+              </NavLink>
+            </>
           )}
         </nav>
         <div className="sidebar-footer">
