@@ -39,11 +39,11 @@ describe('TC-Auth-01: JWT middleware (SEBM-F-002)', () => {
   });
 
   it('sets req.user for a valid token', () => {
-    const token = createSignedToken({ userId: 'user-123', role: 'User' }, { expiresIn: '5m' });
+    const token = createSignedToken({ userId: 'user-123', role: 'user' }, { expiresIn: '5m' });
     const { req, res, next } = runMiddleware(`Bearer ${token}`);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.user).toEqual({ userId: 'user-123', role: 'User' });
+    expect(req.user).toEqual({ userId: 'user-123', role: 'user' });
     expect(res.status).not.toHaveBeenCalled();
   });
 
@@ -84,14 +84,28 @@ describe('TC-Auth-01: JWT middleware (SEBM-F-002)', () => {
   });
 
   it('creates a token accepted by the middleware', () => {
-    const token = signTestToken('user-456', 'Admin');
+    const token = signTestToken('user-456', 'admin');
     const { req, next } = runMiddleware(`Bearer ${token}`);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.user).toEqual({ userId: 'user-456', role: 'Admin' });
+    expect(req.user).toEqual({ userId: 'user-456', role: 'admin' });
+  });
+
+  it('signs title-case role input using the canonical lowercase claim', () => {
+    const token = signTestToken('user-789', 'User');
+
+    expect(jwt.verify(token, TEST_SECRET, { algorithms: ['HS256'] }).role).toBe('user');
+  });
+
+  it('normalizes legacy title-case roles to the database role values', () => {
+    const token = createSignedToken({ userId: 'user-legacy', role: 'User' }, { expiresIn: '5m' });
+    const { req, next } = runMiddleware(`Bearer ${token}`);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toEqual({ userId: 'user-legacy', role: 'user' });
   });
 
   it('rejects unsupported roles when signing a test token', () => {
-    expect(() => signTestToken('user-789', 'Owner')).toThrow('role must be User or Admin');
+    expect(() => signTestToken('user-789', 'Owner')).toThrow('role must be user or admin');
   });
 });

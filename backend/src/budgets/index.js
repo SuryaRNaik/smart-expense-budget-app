@@ -1,7 +1,9 @@
 const express = require('express');
 const { getPool } = require('../db');
+const { authenticateToken } = require('../auth/jwt');
 
 const router = express.Router();
+router.use(authenticateToken);
 
 /**
  * POST /api/budgets
@@ -9,13 +11,7 @@ const router = express.Router();
  */
 router.post('/', async (req, res, next) => {
   try {
-    // 1. Extract user_id securely from auth context, with robust test fallback
-    const testHeaderUser = req.headers['x-test-user-id'] || req.headers['X-Test-User-Id'] || req.headers['x-user-id'];
-    const user_id = req.user?.id || req.user?.user_id || (process.env.NODE_ENV === 'test' ? testHeaderUser : null);
-    
-    if (!user_id || typeof user_id !== 'string') {
-      return res.status(401).json({ error: 'Unauthorized: Missing or invalid authenticated user context.' });
-    }
+    const user_id = req.user.userId;
 
     const { category_id = null, period, limit_amount, alert_threshold = 80.00 } = req.body;
 
@@ -85,13 +81,7 @@ router.post('/', async (req, res, next) => {
  */
 router.get('/progress', async (req, res, next) => {
   try {
-    // 1. Extract user_id securely from auth context
-    const testHeaderUser = req.headers['x-test-user-id'] || req.headers['X-Test-User-Id'] || req.headers['x-user-id'];
-    const user_id = req.user?.id || req.user?.user_id || (process.env.NODE_ENV === 'test' ? testHeaderUser : null);
-
-    if (!user_id || typeof user_id !== 'string') {
-      return res.status(401).json({ error: 'Unauthorized: Missing or invalid authenticated user context.' });
-    }
+    const user_id = req.user.userId;
 
     const { period } = req.query;
 

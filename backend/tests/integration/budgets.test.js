@@ -1,6 +1,11 @@
 const request = require('supertest');
 const app = require('../../src/app');
+const config = require('../../src/config');
 const { getPool, closePool } = require('../../src/db');
+const { signTestToken } = require('../../src/auth/jwt');
+
+const TEST_SECRET = 'budget-integration-test-secret';
+const originalJwtSecret = config.jwtSecret;
 
 describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
   let testUserId;
@@ -8,6 +13,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
   let testCategoryId;
 
   beforeAll(async () => {
+    config.jwtSecret = TEST_SECRET;
     const pool = getPool();
     
     // 1. Create a dedicated test user with a timestamp-unique email
@@ -42,8 +48,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
       testCategoryId = newCat.rows[0].category_id;
     }
 
-    // 4. Insert sample transactions using 'expense'
-    // 4. Insert sample transactions using valid transaction type
+    // 4. Insert sample transactions using valid transaction types
     await pool.query(
       `INSERT INTO transactions (account_id, category_id, amount, type, date)
       VALUES ($1, $2, 150.00, 'expense', '2026-11-10');`,
@@ -57,20 +62,33 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     );
   });
 
+  const authorization = () => `Bearer ${signTestToken(testUserId, 'user')}`;
+
   afterAll(async () => {
-    const pool = getPool();
-    await pool.query('DELETE FROM transactions WHERE account_id = $1;', [testAccountId]);
-    await pool.query('DELETE FROM budgets WHERE user_id = $1;', [testUserId]);
-    await pool.query('DELETE FROM accounts WHERE user_id = $1;', [testUserId]);
-    await pool.query('DELETE FROM users WHERE user_id = $1;', [testUserId]);
-    await closePool();
+    try {
+      if (testUserId) {
+        const pool = getPool();
+        if (testAccountId) {
+          await pool.query('DELETE FROM transactions WHERE account_id = $1;', [testAccountId]);
+        }
+        await pool.query('DELETE FROM budgets WHERE user_id = $1;', [testUserId]);
+        await pool.query('DELETE FROM accounts WHERE user_id = $1;', [testUserId]);
+        await pool.query('DELETE FROM users WHERE user_id = $1;', [testUserId]);
+      }
+    } finally {
+      try {
+        await closePool();
+      } finally {
+        config.jwtSecret = originalJwtSecret;
+      }
+    }
   });
 
   describe('POST /api/budgets - S1-05 Tests', () => {
     test('should successfully create a category-wise budget with valid inputs', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           category_id: testCategoryId,
           period: '2026-11',
@@ -87,7 +105,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should successfully create an overall budget when category_id is null', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           category_id: null,
           period: '2026-12',
@@ -103,7 +121,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 409 conflict when duplicate overall budget is created for same period', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           category_id: null,
           period: '2026-12',
@@ -117,7 +135,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 400 for invalid period format (not YYYY-MM)', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           period: '2026/11',
           limit_amount: 500.00
@@ -130,7 +148,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 400 for invalid alert_threshold (< 0 or > 100)', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           period: '2027-01',
           limit_amount: 500.00,
@@ -144,7 +162,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 400 for non-positive limit_amount (<= 0)', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           period: '2027-01',
           limit_amount: 0.00
@@ -157,7 +175,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 400 for invalid foreign key category_id', async () => {
       const res = await request(app)
         .post('/api/budgets')
-        .set('x-test-user-id', testUserId)
+        .set('Authorization', authorization())
         .send({
           category_id: '00000000-0000-0000-0000-000000000000',
           period: '2027-02',
@@ -173,7 +191,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should calculate spent vs limit dynamically for target period', async () => {
       const res = await request(app)
         .get('/api/budgets/progress?period=2026-11')
-        .set('x-test-user-id', testUserId);
+        .set('Authorization', authorization());
 
       expect(res.statusCode).toEqual(200);
       expect(res.body).toHaveProperty('period', '2026-11');
@@ -192,7 +210,7 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     test('should return 400 for invalid period query parameter', async () => {
       const res = await request(app)
         .get('/api/budgets/progress?period=invalid-period')
-        .set('x-test-user-id', testUserId);
+        .set('Authorization', authorization());
 
       expect(res.statusCode).toEqual(400);
       expect(res.body.error).toMatch(/YYYY-MM format/i);
@@ -203,6 +221,19 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
         .get('/api/budgets/progress?period=2026-11');
 
       expect(res.statusCode).toEqual(401);
+    });
+
+    test('does not trust test-user headers as authentication', async () => {
+      const res = await request(app)
+        .post('/api/budgets')
+        .set('x-test-user-id', testUserId)
+        .send({
+          period: '2027-03',
+          limit_amount: 500.00,
+        });
+
+      expect(res.statusCode).toEqual(401);
+      expect(res.body.error.code).toBe('MISSING_AUTHORIZATION');
     });
   });
 });
