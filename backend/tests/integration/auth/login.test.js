@@ -18,7 +18,7 @@ const TEST_USER = {
   user_id: 'login-user-123',
   name: 'Jane Doe',
   email: 'jane@example.com',
-  role: 'User',
+  role: 'user',
 };
 const protectedApp = express();
 

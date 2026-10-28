@@ -15,7 +15,7 @@ describe('S1-01: registration API', () => {
     db.query
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
-        rows: [{ user_id: 'user-123', name: 'Jane Doe', email: 'jane@example.com', role: 'User' }],
+        rows: [{ user_id: 'user-123', name: 'Jane Doe', email: 'jane@example.com', role: 'user' }],
       });
 
     const response = await request(app)
@@ -32,13 +32,14 @@ describe('S1-01: registration API', () => {
       userId: 'user-123',
       name: 'Jane Doe',
       email: 'jane@example.com',
-      role: 'User',
+      role: 'user',
     });
     expect(response.body.user.passwordHash).toBeUndefined();
     expect(db.query).toHaveBeenCalledTimes(2);
     expect(db.query.mock.calls[0][0]).toContain('SELECT');
     expect(db.query.mock.calls[1][0]).toContain('INSERT INTO users');
     expect(db.query.mock.calls[1][1][2]).toMatch(/^\$2[aby]\$/);
+    expect(db.query.mock.calls[1][1][3]).toBe('user');
   });
 
   it('rejects invalid email format with a 400 response', async () => {

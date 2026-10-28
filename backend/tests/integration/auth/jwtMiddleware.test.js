@@ -22,11 +22,11 @@ describe('TC-Auth-01: JWT middleware integration (SEBM-F-002)', () => {
   });
 
   it('allows a valid test token and exposes the authenticated user', async () => {
-    const token = signTestToken('user-integration', 'User');
+    const token = signTestToken('user-integration', 'user');
     const response = await request(app).get('/protected').set('Authorization', `Bearer ${token}`);
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ user: { userId: 'user-integration', role: 'User' } });
+    expect(response.body).toEqual({ user: { userId: 'user-integration', role: 'user' } });
   });
 
   it.each([

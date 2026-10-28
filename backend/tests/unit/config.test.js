@@ -22,7 +22,7 @@ describe('Configuration & DB Config (Unit)', () => {
     expect(config.db).toBeDefined();
     expect(config.db.host).toBeDefined();
     expect(config.db.port).toBe(5432);
-    expect(config.db.database).toBe('sebm');
+    expect(config.db.database).toBe(config.nodeEnv === 'test' ? 'sebm_test' : 'sebm');
     expect(config.db.user).toBe('sebm');
     expect(config.db.password).toBe('sebm_dev_password');
     expect(config.db.max).toBe(10);

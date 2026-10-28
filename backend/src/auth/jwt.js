@@ -6,8 +6,10 @@ const TOKEN_LIFETIME = '15m';
 const TOKEN_LIFETIME_SECONDS = 15 * 60;
 const REFRESH_TOKEN_LIFETIME = '7d';
 const REFRESH_TOKEN_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
-const VALID_ROLES = new Set(['User', 'Admin']);
+const VALID_ROLES = new Set(['user', 'admin']);
 const INVALID_TOKEN_MESSAGE = 'Invalid or expired token';
+
+const normalizeRole = (role) => (typeof role === 'string' ? role.toLowerCase() : null);
 
 const sendUnauthorized = (res, code, message) =>
   res.status(401).json({
@@ -30,24 +32,26 @@ const validateTokenSubject = (userId, role) => {
     throw new TypeError('userId must be a non-empty string');
   }
 
-  if (!VALID_ROLES.has(role)) {
-    throw new TypeError('role must be User or Admin');
+  const normalizedRole = normalizeRole(role);
+  if (!VALID_ROLES.has(normalizedRole)) {
+    throw new TypeError('role must be user or admin');
   }
+  return normalizedRole;
 };
 
 const signAuthToken = (userId, role) => {
-  validateTokenSubject(userId, role);
+  const normalizedRole = validateTokenSubject(userId, role);
   return jwt.sign(
-    { userId, role, tokenType: 'access' },
+    { userId, role: normalizedRole, tokenType: 'access' },
     getJwtSecret(),
     { algorithm: JWT_ALGORITHM, expiresIn: TOKEN_LIFETIME }
   );
 };
 
 const signRefreshToken = (userId, role) => {
-  validateTokenSubject(userId, role);
+  const normalizedRole = validateTokenSubject(userId, role);
   return jwt.sign(
-    { userId, role, tokenType: 'refresh' },
+    { userId, role: normalizedRole, tokenType: 'refresh' },
     getJwtSecret(),
     { algorithm: JWT_ALGORITHM, expiresIn: REFRESH_TOKEN_LIFETIME }
   );
@@ -55,20 +59,21 @@ const signRefreshToken = (userId, role) => {
 
 const verifyRefreshToken = (token) => {
   const payload = jwt.verify(token, getJwtSecret(), { algorithms: [JWT_ALGORITHM] });
+  const role = normalizeRole(payload?.role);
 
   if (
     !payload ||
     typeof payload !== 'object' ||
     typeof payload.userId !== 'string' ||
     payload.userId.trim().length === 0 ||
-    !VALID_ROLES.has(payload.role) ||
+    !VALID_ROLES.has(role) ||
     payload.tokenType !== 'refresh' ||
     typeof payload.exp !== 'number'
   ) {
     throw new TypeError('Invalid refresh token');
   }
 
-  return { userId: payload.userId, role: payload.role };
+  return { userId: payload.userId, role };
 };
 
 const signTestToken = (userId, role) => signAuthToken(userId, role);
@@ -106,14 +111,14 @@ const authenticateToken = (req, res, next) => {
     typeof payload !== 'object' ||
     typeof payload.userId !== 'string' ||
     payload.userId.trim().length === 0 ||
-    !VALID_ROLES.has(payload.role) ||
+    !VALID_ROLES.has(normalizeRole(payload.role)) ||
     (payload.tokenType !== undefined && payload.tokenType !== 'access') ||
     typeof payload.exp !== 'number'
   ) {
     return sendUnauthorized(res, 'INVALID_TOKEN', INVALID_TOKEN_MESSAGE);
   }
 
-  req.user = { userId: payload.userId, role: payload.role };
+  req.user = { userId: payload.userId, role: normalizeRole(payload.role) };
   return next();
 };
 
