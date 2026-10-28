@@ -315,6 +315,10 @@ a:focus-visible {
   max-width: 920px;
 }
 
+.transactions-page {
+  max-width: 1100px;
+}
+
 .accounts-heading,
 .account-list-heading {
   display: flex;
@@ -367,6 +371,110 @@ a:focus-visible {
 .account-form select:focus {
   border-color: #5c9b70;
   outline: 3px solid rgba(92, 155, 112, 0.16);
+}
+
+.transaction-form,
+.transaction-list {
+  margin-top: 30px;
+  padding-top: 26px;
+  border-top: 1px solid #e9eee8;
+}
+
+.transaction-form h3,
+.transaction-list h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.transaction-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.transaction-form label {
+  display: grid;
+  gap: 7px;
+  color: #40554a;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.transaction-form input,
+.transaction-form select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #dce5dc;
+  border-radius: 9px;
+  color: #152820;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.transaction-form input:focus,
+.transaction-form select:focus {
+  border-color: #5c9b70;
+  outline: 3px solid rgba(92, 155, 112, 0.16);
+}
+
+.transaction-table-wrapper {
+  margin-top: 16px;
+  overflow-x: auto;
+  border: 1px solid #e8eee7;
+  border-radius: 12px;
+}
+
+.transaction-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.transaction-table th,
+.transaction-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #edf1ec;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.transaction-table th {
+  color: #65766b;
+  background: #f7f9f6;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.transaction-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.transaction-table td:first-child {
+  white-space: normal;
+}
+
+.transaction-notes {
+  display: block;
+  margin-top: 4px;
+  color: #738178;
+  font-size: 0.78rem;
+}
+
+.transaction-amount {
+  font-weight: 700;
+  text-align: right;
+}
+
+.transaction-amount.expense {
+  color: #9a403b;
+}
+
+.transaction-amount.income {
+  color: #246347;
 }
 
 .field-note {
@@ -590,6 +698,10 @@ a:focus-visible {
   }
 
   .account-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transaction-form-grid {
     grid-template-columns: 1fr;
   }
 
