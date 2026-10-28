@@ -315,6 +315,47 @@ a:focus-visible {
   max-width: 920px;
 }
 
+.login-page {
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 7px;
+  color: #40554a;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.login-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #dce5dc;
+  border-radius: 9px;
+  color: #152820;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.login-form input:focus {
+  border-color: #5c9b70;
+  outline: 3px solid rgba(92, 155, 112, 0.16);
+}
+
+.login-form .primary-button {
+  justify-self: start;
+  margin-top: 0;
+}
+
 .transactions-page {
   max-width: 1100px;
 }
@@ -642,6 +683,16 @@ a:focus-visible {
   .sidebar-label,
   .sidebar-footer {
     display: none;
+  }
+
+  .logout-button {
+    margin-left: auto;
+    padding: 5px 8px;
+    border: 1px solid #547461;
+    border-radius: 7px;
+    color: #eaf4eb;
+    background: transparent;
+    cursor: pointer;
   }
 
   .sidebar nav {

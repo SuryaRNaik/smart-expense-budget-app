@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { api } from '../../api/client';
 import { AuthProvider, useAuth } from '../../auth/AuthContext';
 import { AccountsPage } from './AccountsPage';
@@ -33,10 +34,12 @@ function AuthControls() {
 
 function renderAccountsPage() {
   return render(
-    <AuthProvider>
-      <AuthControls />
-      <AccountsPage />
-    </AuthProvider>,
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+      <AuthProvider>
+        <AuthControls />
+        <AccountsPage />
+      </AuthProvider>
+    </MemoryRouter>,
   );
 }
 

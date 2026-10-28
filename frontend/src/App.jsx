@@ -4,6 +4,7 @@ import { AppLayout } from './layout/AppLayout';
 import { AccountsPage } from './features/accounts/AccountsPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { NotFoundPage } from './features/shared/NotFoundPage';
+import { LoginPage } from './features/auth/LoginPage';
 import { TransactionsPage } from './features/transactions/TransactionsPage';
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
+            <Route path="login" element={<LoginPage />} />
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="*" element={<NotFoundPage />} />

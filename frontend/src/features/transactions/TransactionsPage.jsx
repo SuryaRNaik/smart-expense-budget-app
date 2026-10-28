@@ -195,7 +195,7 @@ export function TransactionsPage() {
 
         {!accessToken && (
           <p className="inline-message" role="status">
-            Sign in to view or record transactions.
+            Sign in to view or record transactions. <Link to="/login">Sign in</Link>
           </p>
         )}
         {error && <p className="form-message error-message" role="alert">{error}</p>}
