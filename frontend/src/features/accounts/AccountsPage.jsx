@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 
 export function AccountsPage() {
   const { accessToken } = useAuth();
   const [accounts, setAccounts] = useState([]);
+  const [accountsToken, setAccountsToken] = useState(null);
   const [accountType, setAccountType] = useState('cash');
   const [accountName, setAccountName] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
@@ -12,29 +13,46 @@ export function AccountsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const requestControllers = useRef(new Set());
 
   const loadAccounts = useCallback(async () => {
     if (!accessToken) {
       setAccounts([]);
+      setAccountsToken(null);
+      setLoading(false);
       return;
     }
 
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
     setLoading(true);
     setError('');
     try {
       const response = await api.get('/accounts', {
         headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
       });
-      setAccounts(response.accounts);
+      if (!controller.signal.aborted) {
+        setAccounts(response.accounts);
+        setAccountsToken(accessToken);
+      }
     } catch (requestError) {
-      setError(requestError.message);
+      if (!controller.signal.aborted) setError(requestError.message);
     } finally {
-      setLoading(false);
+      requestControllers.current.delete(controller);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [accessToken]);
 
   useEffect(() => {
+    setSubmitting(false);
     loadAccounts();
+    return () => {
+      for (const controller of requestControllers.current) {
+        controller.abort();
+      }
+      requestControllers.current.clear();
+    };
   }, [loadAccounts]);
 
   const handleSubmit = async (event) => {
@@ -47,23 +65,31 @@ export function AccountsPage() {
     setSubmitting(true);
     setError('');
     setNotice('');
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
     try {
       const payload = { accountType, accountName };
       if (openingBalance !== '') payload.openingBalance = Number(openingBalance);
 
       const response = await api.post('/accounts', payload, {
         headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setAccounts((currentAccounts) => [response.account, ...currentAccounts]);
+      setAccountsToken(accessToken);
       setAccountName('');
       setOpeningBalance('');
       setNotice('Account created.');
     } catch (requestError) {
-      setError(requestError.message);
+      if (!controller.signal.aborted) setError(requestError.message);
     } finally {
-      setSubmitting(false);
+      requestControllers.current.delete(controller);
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   };
+
+  const visibleAccounts = accountsToken === accessToken ? accounts : [];
 
   return (
     <div className="accounts-page">
@@ -135,17 +161,19 @@ export function AccountsPage() {
         <div className="account-list" aria-live="polite">
           <div className="account-list-heading">
             <h3>Your accounts</h3>
-            <span>{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</span>
+            <span>{visibleAccounts.length} {visibleAccounts.length === 1 ? 'account' : 'accounts'}</span>
           </div>
-          {loading ? (
+          {!accessToken ? (
+            <p className="empty-state">Your accounts will appear here after you sign in.</p>
+          ) : loading ? (
             <p className="empty-state">Loading accounts…</p>
-          ) : accounts.length === 0 ? (
+          ) : visibleAccounts.length === 0 ? (
             <p className="empty-state">
-              {accessToken ? 'No accounts yet. Create one above to get started.' : 'Your accounts will appear here after you sign in.'}
+              No accounts yet. Create one above to get started.
             </p>
           ) : (
             <ul className="account-list-items">
-              {accounts.map((account) => (
+              {visibleAccounts.map((account) => (
                 <li className="account-list-item" key={account.accountId}>
                   <span className="account-avatar" aria-hidden="true">
                     {account.accountName.slice(0, 1).toUpperCase()}
