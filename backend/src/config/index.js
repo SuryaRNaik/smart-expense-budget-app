@@ -184,7 +184,10 @@ const config = {
     connectionString: process.env.DATABASE_URL || undefined,
     host: process.env.DB_HOST || process.env.PGHOST || 'localhost',
     port: parseInt(process.env.DB_PORT || process.env.PGPORT || '5432', 10),
-    database: process.env.DB_NAME || process.env.POSTGRES_DB || process.env.PGDATABASE || 'sebm',
+    database: process.env.DB_NAME
+      || process.env.POSTGRES_DB
+      || process.env.PGDATABASE
+      || (nodeEnv === 'test' ? 'sebm_test' : 'sebm'),
     user: process.env.DB_USER || process.env.POSTGRES_USER || process.env.PGUSER || 'sebm',
     password: process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || process.env.PGPASSWORD || 'sebm_dev_password',
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
