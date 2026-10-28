@@ -31,10 +31,14 @@ class TransactionService {
     return this.repository.findByUserId(userId);
   }
 
+  async listCategories(userId) {
+    return this.repository.findCategoriesByUserId(userId);
+  }
+
   async createTransaction(userId, data = {}) {
     const { accountId, categoryId, date } = data;
     const amount = parseAmount(data.amount);
-    const type = data.type;
+    const type = typeof data.type === 'string' ? data.type.toLowerCase() : data.type;
 
     if (typeof accountId !== 'string' || accountId.trim() === '') {
       throw createError('VALIDATION_ERROR', 'accountId is required.', 400);
@@ -48,8 +52,8 @@ class TransactionService {
     if (!hasAtMostTwoDecimalPlaces(data.amount)) {
       throw createError('VALIDATION_ERROR', 'amount must have no more than two decimal places.', 400);
     }
-    if (type !== 'Expense' && type !== 'Income') {
-      throw createError('VALIDATION_ERROR', 'type must be either Expense or Income.', 400);
+    if (type !== 'expense' && type !== 'income') {
+      throw createError('VALIDATION_ERROR', 'type must be either expense or income.', 400);
     }
     if (!isValidDate(date)) {
       throw createError('VALIDATION_ERROR', 'date must be a valid date in YYYY-MM-DD format.', 400);

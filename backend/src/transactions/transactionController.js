@@ -11,6 +11,15 @@ const listTransactions = async (req, res, next) => {
   }
 };
 
+const listCategories = async (req, res, next) => {
+  try {
+    const categories = await transactionService.listCategories(req.user.userId);
+    return res.json({ categories });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const createTransaction = async (req, res, next) => {
   try {
     const transaction = await transactionService.createTransaction(req.user.userId, req.body);
@@ -20,4 +29,4 @@ const createTransaction = async (req, res, next) => {
   }
 };
 
-module.exports = { listTransactions, createTransaction };
+module.exports = { listTransactions, listCategories, createTransaction };

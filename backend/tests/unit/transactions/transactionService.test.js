@@ -4,7 +4,7 @@ const validInput = {
   accountId: 'account-1',
   categoryId: 'category-1',
   amount: 25.5,
-  type: 'Expense',
+  type: 'expense',
   date: '2026-10-20',
 };
 
@@ -17,7 +17,7 @@ describe('TransactionService', () => {
           accountId: 'account-1',
           categoryId: 'category-1',
           amount: 25.5,
-          type: 'Expense',
+          type: 'expense',
           date: '2026-10-20',
           notes: null,
           createdAt: '2026-10-20T10:00:00.000Z',
@@ -36,7 +36,7 @@ describe('TransactionService', () => {
       accountId: 'account-1',
       categoryId: 'category-1',
       amount: 25.5,
-      type: 'Expense',
+      type: 'expense',
       date: '2026-10-20',
       notes: null,
     });
@@ -64,6 +64,32 @@ describe('TransactionService', () => {
       ...validInput,
       amount: 0.29,
     })).resolves.toMatchObject({ amount: 0.29 });
+  });
+
+  it('normalizes income to the lowercase value used by the database', async () => {
+    const repository = {
+      createAndUpdateBalance: jest.fn().mockResolvedValue({
+        transaction: {
+          transactionId: 'transaction-1',
+          accountId: 'account-1',
+          categoryId: 'category-1',
+          amount: 25.5,
+          type: 'income',
+          date: '2026-10-20',
+          notes: null,
+          createdAt: '2026-10-20T10:00:00.000Z',
+        },
+        newBalance: 125.5,
+      }),
+    };
+
+    await expect(new TransactionService(repository).createTransaction('user-1', {
+      ...validInput,
+      type: 'Income',
+    })).resolves.toMatchObject({ type: 'income', newBalance: 125.5 });
+    expect(repository.createAndUpdateBalance).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'income' }),
+    );
   });
 
   it.each([

@@ -11,6 +11,12 @@ const mapTransaction = (row) => ({
   createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
 });
 
+const mapCategory = (row) => ({
+  categoryId: row.category_id,
+  name: row.name,
+  type: row.type,
+});
+
 class TransactionRepository {
   constructor(database = db) {
     this.db = database;
@@ -29,6 +35,18 @@ class TransactionRepository {
     );
 
     return result.rows.map(mapTransaction);
+  }
+
+  async findCategoriesByUserId(userId) {
+    const result = await this.db.query(
+      `SELECT category_id, name, type
+       FROM categories
+       WHERE user_id IS NULL OR user_id = $1
+       ORDER BY type ASC, name ASC, category_id ASC`,
+      [userId],
+    );
+
+    return result.rows.map(mapCategory);
   }
 
   async createAndUpdateBalance({ userId, accountId, categoryId, amount, type, date, notes }) {
@@ -77,7 +95,7 @@ class TransactionRepository {
         [accountId, categoryId, amount, date, type, notes],
       );
 
-      const balanceChange = type === 'Expense' ? -amount : amount;
+      const balanceChange = type === 'expense' ? -amount : amount;
       const accountUpdate = await client.query(
         `UPDATE accounts
          SET balance = balance + $1
@@ -116,3 +134,4 @@ class TransactionRepository {
 
 module.exports = TransactionRepository;
 module.exports.mapTransaction = mapTransaction;
+module.exports.mapCategory = mapCategory;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -106,7 +107,7 @@ export function AccountsPage() {
 
         {!accessToken && (
           <p className="inline-message" role="status">
-            Sign in to view or create your accounts. Account requests use your authenticated session.
+            <Link to="/login">Sign in</Link> to view or create your accounts.
           </p>
         )}
         {error && <p className="form-message error-message" role="alert">{error}</p>}

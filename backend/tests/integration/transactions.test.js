@@ -60,7 +60,7 @@ describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
           category_id: 'category-expense',
           amount: '150.25',
           date: '2026-10-20',
-          type: 'Expense',
+          type: 'expense',
           notes: 'Groceries',
           created_at: createdAt,
         }],
@@ -80,7 +80,7 @@ describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
       accountId: 'account-123',
       categoryId: 'category-expense',
       amount: 150.25,
-      type: 'Expense',
+      type: 'expense',
       date: '2026-10-20',
       newBalance: 349.75,
     });
@@ -93,8 +93,58 @@ describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
       'COMMIT',
     ]);
     expect(client.query.mock.calls[1][1]).toEqual(['account-123', 'user-123']);
+    expect(client.query.mock.calls[2][1]).toEqual(['category-expense', 'expense', 'user-123']);
     expect(client.query.mock.calls[4][1]).toEqual([-150.25, 'account-123', 'user-123']);
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds income to the account balance atomically', async () => {
+    const client = createClient([
+      { rows: [] },
+      { rows: [{ account_id: 'account-123', balance: '500.00' }] },
+      { rows: [{ category_id: 'category-income' }] },
+      {
+        rows: [{
+          transaction_id: 'transaction-income',
+          account_id: 'account-123',
+          category_id: 'category-income',
+          amount: '250.00',
+          date: '2026-10-20',
+          type: 'income',
+          notes: null,
+          created_at: new Date('2026-10-20T10:00:00.000Z'),
+        }],
+      },
+      { rows: [{ balance: '750.00' }] },
+      { rows: [] },
+    ]);
+
+    const response = await request(app)
+      .post('/api/transactions')
+      .set('Authorization', authorization())
+      .send(transactionPayload({
+        categoryId: 'category-income',
+        amount: 250,
+        type: 'Income',
+        notes: '',
+      }))
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      transactionId: 'transaction-income',
+      type: 'income',
+      newBalance: 750,
+    });
+    expect(client.query.mock.calls[2][1]).toEqual(['category-income', 'income', 'user-123']);
+    expect(client.query.mock.calls[4][1]).toEqual([250, 'account-123', 'user-123']);
+    expect(client.query.mock.calls.map(([sql]) => sql.trim().split(/\s+/)[0])).toEqual([
+      'BEGIN',
+      'SELECT',
+      'SELECT',
+      'INSERT',
+      'UPDATE',
+      'COMMIT',
+    ]);
   });
 
   it('lists transactions only for the authenticated user', async () => {
@@ -105,7 +155,7 @@ describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
         category_id: 'category-expense',
         amount: '15.00',
         date: '2026-10-20',
-        type: 'Expense',
+        type: 'expense',
         notes: 'Coffee',
         created_at: new Date('2026-10-20T10:00:00.000Z'),
       }],
@@ -121,10 +171,31 @@ describe('Transactions API (SEBM-F-010, TC-Exp-01)', () => {
       transactionId: 'transaction-123',
       accountId: 'account-123',
       amount: 15,
-      type: 'Expense',
+      type: 'expense',
     });
     expect(db.query.mock.calls[0][0]).toContain('INNER JOIN accounts');
     expect(db.query.mock.calls[0][0]).toContain('WHERE accounts.user_id = $1');
+    expect(db.query.mock.calls[0][1]).toEqual(['user-123']);
+  });
+
+  it('lists shared and user-owned categories for the authenticated user', async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { category_id: 'category-food', name: 'Groceries', type: 'expense' },
+        { category_id: 'category-pay', name: 'Salary', type: 'income' },
+      ],
+    });
+
+    const response = await request(app)
+      .get('/api/transactions/categories')
+      .set('Authorization', authorization())
+      .expect(200);
+
+    expect(response.body.categories).toEqual([
+      { categoryId: 'category-food', name: 'Groceries', type: 'expense' },
+      { categoryId: 'category-pay', name: 'Salary', type: 'income' },
+    ]);
+    expect(db.query.mock.calls[0][0]).toContain('WHERE user_id IS NULL OR user_id = $1');
     expect(db.query.mock.calls[0][1]).toEqual(['user-123']);
   });
 

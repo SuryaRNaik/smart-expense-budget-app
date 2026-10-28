@@ -8,7 +8,7 @@ const navigation = [
 ];
 
 export function AppLayout() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, clearUser } = useAuth();
 
   return (
     <div className="app-shell">
@@ -29,10 +29,25 @@ export function AppLayout() {
               {label}
             </NavLink>
           ))}
+          {!isAuthenticated && (
+            <NavLink
+              to="/login"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              Sign in
+            </NavLink>
+          )}
         </nav>
         <div className="sidebar-footer">
           <span className={`connection-dot${isAuthenticated ? ' connected' : ''}`} aria-hidden="true" />
-          <span>{isAuthenticated ? 'Signed in' : 'Authentication not connected'}</span>
+          {isAuthenticated ? (
+            <>
+              <span>{user?.name || 'Signed in'}</span>
+              <button className="logout-button" onClick={clearUser} type="button">Sign out</button>
+            </>
+          ) : (
+            <span>Sign in to connect</span>
+          )}
         </div>
       </aside>
 
