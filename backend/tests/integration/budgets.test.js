@@ -46,13 +46,13 @@ describe('Budget API Integration Tests (S1-05 & S1-06)', () => {
     // 4. Insert sample transactions using valid transaction type
     await pool.query(
       `INSERT INTO transactions (account_id, category_id, amount, type, date)
-      VALUES ($1, $2, 150.00, 'Expense', '2026-11-10');`,
+      VALUES ($1, $2, 150.00, 'expense', '2026-11-10');`,
       [testAccountId, testCategoryId]
     );
 
     await pool.query(
       `INSERT INTO transactions (account_id, category_id, amount, type, date)
-      VALUES ($1, $2, 300.00, 'Expense', '2026-11-15');`,
+      VALUES ($1, $2, 300.00, 'expense', '2026-11-15');`,
       [testAccountId, testCategoryId]
     );
   });

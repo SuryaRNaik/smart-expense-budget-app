@@ -123,7 +123,7 @@ router.get('/progress', async (req, res, next) => {
         t.account_id = a.account_id
         AND (b.category_id IS NULL OR t.category_id = b.category_id)
         AND TO_CHAR(t.date, 'YYYY-MM') = b.period
-        AND t.type = 'Expense'
+        AND t.type = 'expense'
       )
     WHERE b.user_id = $1
       AND b.period = $2
