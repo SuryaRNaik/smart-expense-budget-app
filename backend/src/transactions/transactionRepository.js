@@ -49,6 +49,67 @@ class TransactionRepository {
     return result.rows.map(mapCategory);
   }
 
+  async createCustomCategory({ userId, name, type }) {
+    const client = await this.db.getClient();
+    let transactionStarted = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      // The unique constraint is case-sensitive, so serialise creates for the same
+      // user, type and case-insensitive name to keep names unique ignoring case.
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`custom-category:${userId}:${type}:${name.toLowerCase()}`],
+      );
+
+      const duplicate = await client.query(
+        `SELECT category_id
+         FROM categories
+         WHERE type = $1
+           AND LOWER(name) = LOWER($2)
+           AND (user_id IS NULL OR user_id = $3)
+         LIMIT 1`,
+        [type, name, userId],
+      );
+
+      if (duplicate.rows.length > 0) {
+        const error = new Error('A category with this name and type already exists.');
+        error.code = 'CATEGORY_EXISTS';
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const result = await client.query(
+        `INSERT INTO categories (user_id, name, type, is_custom)
+         VALUES ($1, $2, $3, TRUE)
+         RETURNING category_id, name, type`,
+        [userId, name, type],
+      );
+
+      await client.query('COMMIT');
+      return mapCategory(result.rows[0]);
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          console.error('Failed to roll back custom category creation.', rollbackError);
+        }
+      }
+      if (error.code === '23505') {
+        const conflict = new Error('A category with this name and type already exists.');
+        conflict.code = 'CATEGORY_EXISTS';
+        conflict.statusCode = 409;
+        throw conflict;
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async createAndUpdateBalance({ userId, accountId, categoryId, amount, type, date, notes }) {
     const client = await this.db.getClient();
     let transactionStarted = false;
