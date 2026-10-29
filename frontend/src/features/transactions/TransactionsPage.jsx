@@ -38,6 +38,7 @@ export function TransactionsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -172,7 +173,7 @@ export function TransactionsPage() {
   const handleCreateCategory = async (event) => {
     event.preventDefault();
     if (!accessToken) {
-      setError('Sign in before adding a category.');
+      setCategoryError('Sign in before adding a category.');
       return;
     }
 
@@ -180,6 +181,7 @@ export function TransactionsPage() {
     if (!name) return;
 
     setCreatingCategory(true);
+    setCategoryError('');
     setError('');
     setNotice('');
     const controller = new AbortController();
@@ -197,7 +199,7 @@ export function TransactionsPage() {
       setNewCategoryName('');
       setNotice(`Category "${response.category.name}" added.`);
     } catch (requestError) {
-      if (!controller.signal.aborted) setError(requestError.message);
+      if (!controller.signal.aborted) setCategoryError(requestError.message);
     } finally {
       requestControllers.current.delete(controller);
       if (!controller.signal.aborted) setCreatingCategory(false);
@@ -334,6 +336,7 @@ export function TransactionsPage() {
         {accessToken && (
           <form aria-label="Add a custom category" className="transaction-form" onSubmit={handleCreateCategory}>
             <h3>Add a custom category</h3>
+            {categoryError && <p className="form-message error-message" role="alert">{categoryError}</p>}
             <div className="transaction-form-grid">
               <label>
                 {type === 'income' ? 'New income category' : 'New expense category'}
