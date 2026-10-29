@@ -35,6 +35,20 @@ class TransactionService {
     return this.repository.findCategoriesByUserId(userId);
   }
 
+  async createCategory(userId, data = {}) {
+    const name = typeof data.name === 'string' ? data.name.trim() : '';
+    const type = typeof data.type === 'string' ? data.type.trim().toLowerCase() : data.type;
+
+    if (!name || name.length > 100) {
+      throw createError('VALIDATION_ERROR', 'name is required and must not exceed 100 characters.', 400);
+    }
+    if (type !== 'expense' && type !== 'income') {
+      throw createError('VALIDATION_ERROR', 'type must be either expense or income.', 400);
+    }
+
+    return this.repository.createCustomCategory({ userId, name, type });
+  }
+
   async createTransaction(userId, data = {}) {
     const { accountId, categoryId, date } = data;
     const amount = parseAmount(data.amount);
