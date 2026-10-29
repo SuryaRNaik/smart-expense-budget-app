@@ -13,6 +13,12 @@ const modules = [
     to: '/transactions',
     symbol: 'T',
   },
+  {
+    title: 'Budgets',
+    description: 'Set monthly limits and track spending progress.',
+    to: '/budgets',
+    symbol: 'B',
+  },
 ];
 
 export function DashboardPage() {
