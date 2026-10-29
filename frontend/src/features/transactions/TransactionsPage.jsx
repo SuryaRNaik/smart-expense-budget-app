@@ -36,6 +36,8 @@ export function TransactionsPage() {
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -167,6 +169,41 @@ export function TransactionsPage() {
     }
   };
 
+  const handleCreateCategory = async (event) => {
+    event.preventDefault();
+    if (!accessToken) {
+      setError('Sign in before adding a category.');
+      return;
+    }
+
+    const name = newCategoryName.trim();
+    if (!name) return;
+
+    setCreatingCategory(true);
+    setError('');
+    setNotice('');
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
+
+    try {
+      const response = await api.post('/transactions/categories', { name, type }, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+
+      setCategories((current) => [...current, response.category]);
+      setCategoryId(response.category.categoryId);
+      setNewCategoryName('');
+      setNotice(`Category "${response.category.name}" added.`);
+    } catch (requestError) {
+      if (!controller.signal.aborted) setError(requestError.message);
+    } finally {
+      requestControllers.current.delete(controller);
+      if (!controller.signal.aborted) setCreatingCategory(false);
+    }
+  };
+
   const canSubmit = Boolean(
     accessToken &&
     accountId &&
@@ -290,6 +327,31 @@ export function TransactionsPage() {
             )}
             <button className="primary-button" disabled={!canSubmit || submitting || loading} type="submit">
               {submitting ? 'Saving…' : 'Save transaction'}
+            </button>
+          </form>
+        )}
+
+        {accessToken && (
+          <form aria-label="Add a custom category" className="transaction-form" onSubmit={handleCreateCategory}>
+            <h3>Add a custom category</h3>
+            <div className="transaction-form-grid">
+              <label>
+                {type === 'income' ? 'New income category' : 'New expense category'}
+                <input
+                  maxLength={100}
+                  name="newCategoryName"
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  required
+                  value={newCategoryName}
+                />
+              </label>
+            </div>
+            <button
+              className="secondary-button"
+              disabled={creatingCategory || loading || !newCategoryName.trim()}
+              type="submit"
+            >
+              {creatingCategory ? 'Adding…' : 'Add category'}
             </button>
           </form>
         )}
