@@ -21,7 +21,7 @@ const requireRole = (requiredRole) => {
     if (!req.user || typeof req.user !== 'object' || typeof req.user.role !== 'string') {
       return res.status(401).json({
         error: {
-          code: 'MISSING_AUTHORIZATION',
+          code: 'UNAUTHORIZED',
           message: 'Authentication required.',
         },
       });
