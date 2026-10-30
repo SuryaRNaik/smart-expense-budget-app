@@ -20,7 +20,7 @@ describe('Backend Scaffold & Routing (Integration)', () => {
       { prefix: '/api/reports', status: 404 },
       { prefix: '/api/notifications', status: 404 },
       { prefix: '/api/admin', status: 404 },
-      { prefix: '/api/receipts', status: 404 },
+      { prefix: '/api/receipts', status: 401 },
     ];
 
     for (const { prefix, status } of moduleRoutes) {
