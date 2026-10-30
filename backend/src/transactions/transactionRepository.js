@@ -227,16 +227,15 @@ class TransactionRepository {
       await client.query('BEGIN');
       transactionStarted = true;
 
-      // Lock the transaction row, but only if it belongs to one of the user's accounts.
+      // Lock the transaction row first. Ownership is checked right after through the account
+      // lock below. Joining accounts here made a concurrent account move look like a missing
+      // row (the join was re-checked against the old account), giving a false 404.
       const existingResult = await client.query(
-        `SELECT transactions.transaction_id, transactions.account_id, transactions.category_id,
-                transactions.amount, transactions.date, transactions.type, transactions.notes,
-                transactions.created_at
+        `SELECT transaction_id, account_id, category_id, amount, date, type, notes, created_at
          FROM transactions
-         INNER JOIN accounts ON accounts.account_id = transactions.account_id
-         WHERE transactions.transaction_id = $1 AND accounts.user_id = $2
-         FOR UPDATE OF transactions`,
-        [transactionId, userId],
+         WHERE transaction_id = $1
+         FOR UPDATE`,
+        [transactionId],
       );
 
       if (existingResult.rows.length === 0) {
@@ -324,14 +323,11 @@ class TransactionRepository {
       transactionStarted = true;
 
       const existingResult = await client.query(
-        `SELECT transactions.transaction_id, transactions.account_id, transactions.category_id,
-                transactions.amount, transactions.date, transactions.type, transactions.notes,
-                transactions.created_at
+        `SELECT transaction_id, account_id, category_id, amount, date, type, notes, created_at
          FROM transactions
-         INNER JOIN accounts ON accounts.account_id = transactions.account_id
-         WHERE transactions.transaction_id = $1 AND accounts.user_id = $2
-         FOR UPDATE OF transactions`,
-        [transactionId, userId],
+         WHERE transaction_id = $1
+         FOR UPDATE`,
+        [transactionId],
       );
 
       if (existingResult.rows.length === 0) {
@@ -342,10 +338,15 @@ class TransactionRepository {
 
       // Same lock order as an edit (transaction row first, then account) so a delete and
       // an account-moving edit can never wait on each other.
-      await client.query(
+      const ownerAccount = await client.query(
         'SELECT account_id FROM accounts WHERE account_id = $1 AND user_id = $2 FOR UPDATE',
         [existing.accountId, userId],
       );
+
+      // Not the caller's account: report it as missing, exactly like an unknown id.
+      if (ownerAccount.rows.length === 0) {
+        throw notFound('TRANSACTION_NOT_FOUND', 'Transaction not found.');
+      }
 
       await client.query('DELETE FROM transactions WHERE transaction_id = $1', [transactionId]);
 
