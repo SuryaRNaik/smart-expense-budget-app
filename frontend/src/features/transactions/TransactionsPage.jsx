@@ -45,6 +45,10 @@ export function TransactionsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const requestControllers = useRef(new Set());
+  // Only one create/edit/delete runs at a time, so account balances from overlapping
+  // responses can never be applied out of order. The ref blocks double clicks that land
+  // before React re-renders the disabled buttons.
+  const writeInFlight = useRef(false);
 
   const visibleCategories = dataToken === accessToken ? categories : [];
   const availableCategories = useMemo(
@@ -72,6 +76,8 @@ export function TransactionsPage() {
       setCategoryId('');
       setLoading(false);
       setSubmitting(false);
+      setDeletingId(null);
+      setEditingId(null);
       return undefined;
     }
 
@@ -79,6 +85,7 @@ export function TransactionsPage() {
     requestControllers.current.add(controller);
     setLoading(true);
     setSubmitting(false);
+    setDeletingId(null);
     setError('');
 
     const options = {
@@ -132,6 +139,8 @@ export function TransactionsPage() {
       return;
     }
 
+    if (writeInFlight.current) return;
+    writeInFlight.current = true;
     setSubmitting(true);
     setError('');
     setNotice('');
@@ -181,6 +190,7 @@ export function TransactionsPage() {
       if (!controller.signal.aborted) setError(requestError.message);
     } finally {
       requestControllers.current.delete(controller);
+      writeInFlight.current = false;
       if (!controller.signal.aborted) setSubmitting(false);
     }
   };
@@ -205,9 +215,10 @@ export function TransactionsPage() {
   };
 
   const handleDelete = async (transaction) => {
-    if (!accessToken) return;
+    if (!accessToken || writeInFlight.current) return;
     if (!window.confirm('Delete this transaction? The account balance will be adjusted.')) return;
 
+    writeInFlight.current = true;
     setDeletingId(transaction.transactionId);
     setError('');
     setNotice('');
@@ -237,6 +248,7 @@ export function TransactionsPage() {
       if (!controller.signal.aborted) setError(requestError.message);
     } finally {
       requestControllers.current.delete(controller);
+      writeInFlight.current = false;
       if (!controller.signal.aborted) setDeletingId(null);
     }
   };
@@ -276,6 +288,8 @@ export function TransactionsPage() {
       if (!controller.signal.aborted) setCreatingCategory(false);
     }
   };
+
+  const rowActionsDisabled = submitting || deletingId !== null;
 
   const canSubmit = Boolean(
     accessToken &&
@@ -398,11 +412,11 @@ export function TransactionsPage() {
             {availableCategories.length === 0 && !loading && (
               <p className="empty-state">No categories are available for this transaction type.</p>
             )}
-            <button className="primary-button" disabled={!canSubmit || submitting || loading} type="submit">
+            <button className="primary-button" disabled={!canSubmit || submitting || deletingId !== null || loading} type="submit">
               {submitting ? 'Saving…' : editingId ? 'Update transaction' : 'Save transaction'}
             </button>
             {editingId && (
-              <button className="secondary-button" disabled={submitting} onClick={cancelEditing} type="button">
+              <button className="secondary-button" disabled={submitting || deletingId !== null} onClick={cancelEditing} type="button">
                 Cancel edit
               </button>
             )}
@@ -474,7 +488,7 @@ export function TransactionsPage() {
                         <button
                           aria-label={`Edit ${categoryNames.get(transaction.categoryId) || 'transaction'} on ${transaction.date}`}
                           className="secondary-button"
-                          disabled={submitting || deletingId === transaction.transactionId}
+                          disabled={rowActionsDisabled}
                           onClick={() => startEditing(transaction)}
                           type="button"
                         >
@@ -483,7 +497,7 @@ export function TransactionsPage() {
                         <button
                           aria-label={`Delete ${categoryNames.get(transaction.categoryId) || 'transaction'} on ${transaction.date}`}
                           className="secondary-button"
-                          disabled={submitting || deletingId === transaction.transactionId}
+                          disabled={rowActionsDisabled}
                           onClick={() => handleDelete(transaction)}
                           type="button"
                         >
