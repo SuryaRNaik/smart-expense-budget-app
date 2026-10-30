@@ -897,3 +897,13 @@ a:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+.transaction-actions {
+  display: flex;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.transaction-form .primary-button + .secondary-button {
+  margin-left: 0.5rem;
+}
