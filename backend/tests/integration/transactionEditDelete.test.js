@@ -253,6 +253,30 @@ describe('S2-05: edit and delete transactions on PostgreSQL (SEBM-F-011, TC-Exp-
     expect(mine).toHaveLength(5);
   });
 
+  it('never reports a transaction as missing when a delete races an edit that moves it', async () => {
+    const accountA = await createAccount(owner, 'Move race A', 500);
+    const accountB = await createAccount(owner, 'Move race B', 500);
+    const statuses = [];
+    for (let i = 0; i < 25; i += 1) {
+      const created = await record(owner, {
+        accountId: accountA, categoryId: expenseCategory, amount: 10, type: 'expense', date: today,
+      });
+      const [move, removal] = await Promise.all([
+        request(app)
+          .put(`/api/transactions/${created.transactionId}`)
+          .set(owner.auth)
+          .send({ accountId: accountB, categoryId: expenseCategory, amount: 10, type: 'expense', date: today }),
+        request(app).delete(`/api/transactions/${created.transactionId}`).set(owner.auth),
+      ]);
+      statuses.push([move.status, removal.status]);
+    }
+    // The transaction exists and belongs to the user the whole time, so the delete always succeeds.
+    expect(statuses.filter(([, removal]) => removal !== 200)).toEqual([]);
+    expect(statuses.filter(([move]) => move >= 500)).toEqual([]);
+    expect(await balanceOf(owner, accountA)).toBe(500);
+    expect(await balanceOf(owner, accountB)).toBe(500);
+  });
+
   it('shows edits and deletes in budget progress (reports read transactions live)', async () => {
     const accountId = await createAccount(owner, 'Budget', 1000);
     const period = '2026-09';
