@@ -1,4 +1,5 @@
 const TransactionRepository = require('./transactionRepository');
+const { checkThreshold } = require('../budgets');
 
 const createError = (code, message, statusCode) => {
   const error = new Error(message);
@@ -72,6 +73,15 @@ class TransactionService {
       date,
       notes,
     });
+
+    // Trigger budget threshold evaluation for expense transactions (S2-08 / SEBM-F-022)
+    if (transaction.type === 'expense') {
+      try {
+        await checkThreshold(userId, transaction.categoryId, transaction.date);
+      } catch (err) {
+        console.error('Error executing budget checkThreshold:', err);
+      }
+    }
 
     return {
       transactionId: transaction.transactionId,
