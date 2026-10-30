@@ -6,6 +6,8 @@ import { DashboardPage } from './features/dashboard/DashboardPage';
 import { NotFoundPage } from './features/shared/NotFoundPage';
 import { LoginPage } from './features/auth/LoginPage';
 import { RegistrationPage } from './features/auth/RegistrationPage';
+import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage';
+import { ResetPasswordPage } from './features/auth/ResetPasswordPage';
 import { BudgetsPage } from './features/budgets/BudgetsPage';
 import { TransactionsPage } from './features/transactions/TransactionsPage';
 
@@ -18,6 +20,8 @@ function App() {
             <Route index element={<DashboardPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="register" element={<RegistrationPage />} />
+            <Route path="forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="budgets" element={<BudgetsPage />} />

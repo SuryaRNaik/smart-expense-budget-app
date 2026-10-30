@@ -2,8 +2,8 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 
 const JWT_ALGORITHM = 'HS256';
-const TOKEN_LIFETIME = '15m';
-const TOKEN_LIFETIME_SECONDS = 15 * 60;
+const TOKEN_LIFETIME_SECONDS = config.sessionTimeoutSeconds;
+const TOKEN_LIFETIME = `${config.sessionTimeoutSeconds}s`;
 const REFRESH_TOKEN_LIFETIME = '7d';
 const REFRESH_TOKEN_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 const VALID_ROLES = new Set(['user', 'admin']);
