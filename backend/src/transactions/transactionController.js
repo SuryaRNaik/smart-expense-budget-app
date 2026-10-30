@@ -38,4 +38,33 @@ const createTransaction = async (req, res, next) => {
   }
 };
 
-module.exports = { listTransactions, listCategories, createCategory, createTransaction };
+const updateTransaction = async (req, res, next) => {
+  try {
+    const transaction = await transactionService.updateTransaction(
+      req.user.userId,
+      req.params.transactionId,
+      req.body,
+    );
+    return res.json(transaction);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const deleteTransaction = async (req, res, next) => {
+  try {
+    const result = await transactionService.deleteTransaction(req.user.userId, req.params.transactionId);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = {
+  listTransactions,
+  listCategories,
+  createCategory,
+  createTransaction,
+  updateTransaction,
+  deleteTransaction,
+};
