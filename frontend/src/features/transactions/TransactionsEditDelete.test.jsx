@@ -155,3 +155,89 @@ describe('TransactionsPage edit and delete (SEBM-F-011, TC-Exp-02)', () => {
     expect(screen.getByText('Coffee')).toBeTruthy();
   });
 });
+
+describe('TransactionsPage overlapping writes (PR review: stale balance)', () => {
+  afterEach(() => cleanup());
+  beforeEach(() => vi.clearAllMocks());
+
+  const twoTransactions = {
+    transactions: [
+      { ...transactions.transactions[0] },
+      { ...transactions.transactions[0], transactionId: 'transaction-second', amount: 7, notes: 'Tea', date: '2026-10-26' },
+    ],
+  };
+
+  async function openWithTwo() {
+    const user = userEvent.setup();
+    api.get.mockImplementation((path) => {
+      if (path === '/accounts') return Promise.resolve(accounts);
+      if (path === '/transactions/categories') return Promise.resolve(categories);
+      if (path === '/transactions') return Promise.resolve(twoTransactions);
+      throw new Error(`Unexpected API path: ${path}`);
+    });
+    render(
+      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+        <AuthProvider><SignIn /><TransactionsPage /></AuthProvider>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText('Tea')).toBeTruthy();
+    return user;
+  }
+
+  it('disables every Edit, Delete and save control while a delete is in flight', async () => {
+    const user = await openWithTwo();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let finish;
+    api.delete.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+
+    await user.click(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-27' }));
+
+    for (const button of screen.getAllByRole('button', { name: /^(Edit|Delete) / })) {
+      expect(button.disabled).toBe(true);
+    }
+    expect(screen.getByRole('button', { name: 'Save transaction' }).disabled).toBe(true);
+
+    // A second delete attempt does not reach the API.
+    await user.click(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-26' }));
+    expect(api.delete).toHaveBeenCalledTimes(1);
+
+    finish({ transactionId: 'transaction-existing', accountId: 'account-1', newBalance: 512.5 });
+    expect(await screen.findByText('Transaction deleted.')).toBeTruthy();
+    await waitFor(() => {
+      for (const button of screen.getAllByRole('button', { name: /^(Edit|Delete) / })) {
+        expect(button.disabled).toBe(false);
+      }
+    });
+  });
+
+  it('applies two deletes one after the other so the last balance shown is the latest', async () => {
+    const user = await openWithTwo();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    api.delete
+      .mockResolvedValueOnce({ transactionId: 'transaction-existing', accountId: 'account-1', newBalance: 512.5 })
+      .mockResolvedValueOnce({ transactionId: 'transaction-second', accountId: 'account-1', newBalance: 519.5 });
+
+    await user.click(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-27' }));
+    await waitFor(() => expect(screen.queryByText('Coffee')).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-26' }));
+    await waitFor(() => expect(screen.queryByText('Tea')).toBeNull());
+    expect(api.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start a delete while an edit is being saved', async () => {
+    const user = await openWithTwo();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let finish;
+    api.put.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+
+    await user.click(screen.getByRole('button', { name: 'Edit Groceries on 2026-10-27' }));
+    await user.click(screen.getByRole('button', { name: 'Update transaction' }));
+    expect(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-26' }).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Delete Groceries on 2026-10-26' }));
+    expect(api.delete).not.toHaveBeenCalled();
+
+    finish({ ...twoTransactions.transactions[0], newBalance: 487.5 });
+    expect(await screen.findByText('Transaction updated.')).toBeTruthy();
+  });
+});
