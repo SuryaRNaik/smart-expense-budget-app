@@ -38,17 +38,19 @@ function SessionHarness() {
   );
 }
 
-describe('AuthContext session timeout', () => {
+describe('TC-Sec-05: AuthContext session timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.stubEnv('VITE_SESSION_TIMEOUT_SECONDS', '900');
   });
 
   afterEach(() => {
     vi.runOnlyPendingTimers();
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
-  it('logs the user out after 15 minutes of inactivity', async () => {
+  it('logs the user out after the configured inactivity timeout', async () => {
     render(
       <AuthProvider>
         <SessionHarness />
@@ -62,7 +64,7 @@ describe('AuthContext session timeout', () => {
     expect(screen.getByText('authenticated')).toBeTruthy();
 
     await act(async () => {
-      vi.advanceTimersByTime(15 * 60 * 1000 + 1000);
+      vi.advanceTimersByTime(900 * 1000 + 1000);
     });
 
     expect(screen.getByText('signed-out')).toBeTruthy();

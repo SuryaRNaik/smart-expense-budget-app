@@ -1,8 +1,10 @@
+const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
 const config = require('../config');
+const NotificationService = require('../notifications/notificationService');
 const {
   signAuthToken,
   signRefreshToken,
@@ -12,7 +14,27 @@ const {
 } = require('./jwt');
 
 const router = express.Router();
-const PASSWORD_RESET_TOKEN_LIFETIME_SECONDS = 30 * 60;
+
+const getPasswordResetTokenLifetimeSeconds = () => {
+  const configuredLifetime = Number.parseInt(
+    process.env.PASSWORD_RESET_TOKEN_LIFETIME_SECONDS ?? process.env.RESET_TOKEN_LIFETIME_SECONDS ?? String(config.passwordResetTokenLifetimeSeconds ?? 30 * 60),
+    10
+  );
+
+  if (Number.isFinite(configuredLifetime) && configuredLifetime > 0) {
+    return configuredLifetime;
+  }
+
+  return 30 * 60;
+};
+
+const hashPasswordResetTokenId = (tokenId) => {
+  if (typeof tokenId !== 'string' || tokenId.trim().length === 0) {
+    throw new TypeError('Reset token identifier is required.');
+  }
+
+  return crypto.createHash('sha256').update(tokenId).digest('hex');
+};
 
 const normalizeEmail = (value = '') => String(value).trim().toLowerCase();
 
@@ -100,16 +122,19 @@ const signPasswordResetToken = (userId, email) => {
     throw new Error('Authentication is not configured');
   }
 
+  const resetTokenId = crypto.randomBytes(32).toString('hex');
+
   return jwt.sign(
     {
       userId,
       email: normalizedEmail,
       tokenType: 'password-reset',
+      jti: resetTokenId,
     },
     config.jwtSecret,
     {
       algorithm: 'HS256',
-      expiresIn: PASSWORD_RESET_TOKEN_LIFETIME_SECONDS,
+      expiresIn: getPasswordResetTokenLifetimeSeconds(),
     }
   );
 };
@@ -132,7 +157,9 @@ const verifyPasswordResetToken = (token) => {
     payload.userId.trim().length === 0 ||
     !payload.email ||
     typeof payload.email !== 'string' ||
-    payload.tokenType !== 'password-reset'
+    payload.tokenType !== 'password-reset' ||
+    typeof payload.jti !== 'string' ||
+    payload.jti.trim().length === 0
   ) {
     throw new TypeError('Invalid or expired password reset token.');
   }
@@ -140,6 +167,7 @@ const verifyPasswordResetToken = (token) => {
   return {
     userId: payload.userId,
     email: normalizeEmail(payload.email),
+    jti: payload.jti,
   };
 };
 
@@ -322,11 +350,22 @@ router.post(['/forgot-password', '/request-reset', '/request-password-reset'], a
 
     const user = result.rows[0];
     const resetToken = signPasswordResetToken(user.user_id, user.email);
+    const resetUrl = `/reset-password?token=${encodeURIComponent(resetToken)}`;
+    const resetTokenId = verifyPasswordResetToken(resetToken).jti;
+
+    await db.query('UPDATE users SET password_reset_token_hash = $1 WHERE user_id = $2;', [
+      hashPasswordResetTokenId(resetTokenId),
+      user.user_id,
+    ]);
+
+    await NotificationService.send({
+      userId: user.user_id,
+      type: 'PASSWORD_RESET',
+      message: `Use this link to reset your password: ${resetUrl}`,
+    });
 
     return res.status(200).json({
       message: 'If an account with that email exists, a password reset link has been sent.',
-      resetToken,
-      resetUrl: `/reset-password?token=${encodeURIComponent(resetToken)}`,
     });
   } catch (error) {
     return next(error);
@@ -353,7 +392,10 @@ router.post('/reset-password', async (req, res, next) => {
     }
 
     const payload = verifyPasswordResetToken(validation.resetTokenValue);
-    const existingUser = await db.query('SELECT user_id FROM users WHERE user_id = $1 LIMIT 1;', [payload.userId]);
+    const existingUser = await db.query(
+      'SELECT user_id, password_reset_token_hash FROM users WHERE user_id = $1 LIMIT 1;',
+      [payload.userId]
+    );
 
     if (existingUser.rows.length === 0) {
       return res.status(401).json({
@@ -364,8 +406,22 @@ router.post('/reset-password', async (req, res, next) => {
       });
     }
 
+    const userRecord = existingUser.rows[0];
+    const storedResetTokenHash = typeof userRecord.password_reset_token_hash === 'string'
+      ? userRecord.password_reset_token_hash
+      : null;
+
+    if (!storedResetTokenHash || storedResetTokenHash !== hashPasswordResetTokenId(payload.jti)) {
+      return res.status(401).json({
+        error: {
+          code: 'INVALID_RESET_TOKEN',
+          message: 'Invalid or expired password reset token.',
+        },
+      });
+    }
+
     const passwordHash = await hashPassword(validation.normalizedPassword);
-    await db.query('UPDATE users SET password_hash = $1 WHERE user_id = $2;', [
+    await db.query('UPDATE users SET password_hash = $1, password_reset_token_hash = NULL WHERE user_id = $2;', [
       passwordHash,
       payload.userId,
     ]);
@@ -390,6 +446,24 @@ router.post('/reset-password', async (req, res, next) => {
 router.post('/verify-reset-token', async (req, res) => {
   try {
     const payload = verifyPasswordResetToken(req.body?.token || req.body?.resetToken);
+    const userRecord = await db.query(
+      'SELECT user_id, password_reset_token_hash FROM users WHERE user_id = $1 LIMIT 1;',
+      [payload.userId]
+    );
+
+    const storedResetTokenHash = userRecord.rows[0] && typeof userRecord.rows[0].password_reset_token_hash === 'string'
+      ? userRecord.rows[0].password_reset_token_hash
+      : null;
+
+    if (!storedResetTokenHash || storedResetTokenHash !== hashPasswordResetTokenId(payload.jti)) {
+      return res.status(401).json({
+        error: {
+          code: 'INVALID_RESET_TOKEN',
+          message: 'Invalid or expired password reset token.',
+        },
+      });
+    }
+
     return res.status(200).json({
       valid: true,
       userId: payload.userId,

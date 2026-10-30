@@ -7,8 +7,34 @@ import {
   useState,
 } from 'react';
 
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 const INACTIVITY_EVENTS = ['click', 'keydown', 'mousemove', 'touchstart', 'scroll', 'pointerdown'];
+
+const getSessionTimeoutMs = () => {
+  const configuredValue =
+    import.meta.env.VITE_SESSION_TIMEOUT_SECONDS ??
+    import.meta.env.VITE_SESSION_TIMEOUT_MINUTES ??
+    import.meta.env.VITE_SESSION_TIMEOUT_MS;
+
+  if (configuredValue === undefined || configuredValue === null || configuredValue === '') {
+    return DEFAULT_SESSION_TIMEOUT_MS;
+  }
+
+  const value = Number.parseFloat(String(configuredValue));
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_SESSION_TIMEOUT_MS;
+  }
+
+  if (import.meta.env.VITE_SESSION_TIMEOUT_MINUTES !== undefined && import.meta.env.VITE_SESSION_TIMEOUT_MINUTES !== null && import.meta.env.VITE_SESSION_TIMEOUT_MINUTES !== '') {
+    return value * 60 * 1000;
+  }
+
+  if (import.meta.env.VITE_SESSION_TIMEOUT_SECONDS !== undefined && import.meta.env.VITE_SESSION_TIMEOUT_SECONDS !== null && import.meta.env.VITE_SESSION_TIMEOUT_SECONDS !== '') {
+    return value * 1000;
+  }
+
+  return value;
+};
 
 const AuthContext = createContext(null);
 
@@ -38,7 +64,7 @@ const getAccessTokenExpiryMs = (token) => {
     return payload.exp * 1000;
   }
 
-  return Date.now() + SESSION_TIMEOUT_MS;
+  return Date.now() + getSessionTimeoutMs();
 };
 
 export function AuthProvider({ children }) {
@@ -62,8 +88,9 @@ export function AuthProvider({ children }) {
       return undefined;
     }
 
+    const sessionTimeoutMs = getSessionTimeoutMs();
     const tokenExpiresAt = getAccessTokenExpiryMs(accessToken);
-    const inactivityDeadline = lastActivityAt + SESSION_TIMEOUT_MS;
+    const inactivityDeadline = lastActivityAt + sessionTimeoutMs;
     const timeoutAt = Math.min(tokenExpiresAt, inactivityDeadline);
     const timeoutMs = timeoutAt - Date.now();
 
