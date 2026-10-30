@@ -1,11 +1,20 @@
 const db = require('../db');
 
+// node-postgres parses a DATE column as local midnight, so read the local calendar day.
+// Using toISOString() here shifted dates by one day on servers east of UTC.
+const formatDate = (value) => {
+  if (!(value instanceof Date)) return value;
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${value.getFullYear()}-${month}-${day}`;
+};
+
 const mapTransaction = (row) => ({
   transactionId: row.transaction_id,
   accountId: row.account_id,
   categoryId: row.category_id,
   amount: Number(row.amount),
-  date: row.date instanceof Date ? row.date.toISOString().slice(0, 10) : row.date,
+  date: formatDate(row.date),
   type: row.type,
   notes: row.notes,
   createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
@@ -16,6 +25,24 @@ const mapCategory = (row) => ({
   name: row.name,
   type: row.type,
 });
+
+const notFound = (code, message) => {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = 404;
+  return error;
+};
+
+const signedAmount = (type, amount) => (type === 'expense' ? -amount : amount);
+
+const rollback = async (client, started, message) => {
+  if (!started) return;
+  try {
+    await client.query('ROLLBACK');
+  } catch (rollbackError) {
+    console.error(message, rollbackError);
+  }
+};
 
 class TransactionRepository {
   constructor(database = db) {
@@ -186,6 +213,152 @@ class TransactionRepository {
           console.error('Failed to roll back transaction creation.', rollbackError);
         }
       }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateAndAdjustBalance({ userId, transactionId, accountId, categoryId, amount, type, date, notes }) {
+    const client = await this.db.getClient();
+    let transactionStarted = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      // Lock the transaction row, but only if it belongs to one of the user's accounts.
+      const existingResult = await client.query(
+        `SELECT transactions.transaction_id, transactions.account_id, transactions.category_id,
+                transactions.amount, transactions.date, transactions.type, transactions.notes,
+                transactions.created_at
+         FROM transactions
+         INNER JOIN accounts ON accounts.account_id = transactions.account_id
+         WHERE transactions.transaction_id = $1 AND accounts.user_id = $2
+         FOR UPDATE OF transactions`,
+        [transactionId, userId],
+      );
+
+      if (existingResult.rows.length === 0) {
+        throw notFound('TRANSACTION_NOT_FOUND', 'Transaction not found.');
+      }
+
+      const existing = mapTransaction(existingResult.rows[0]);
+
+      // Lock both accounts in a stable order so concurrent edits cannot deadlock.
+      const accountIds = [...new Set([existing.accountId, accountId])].sort();
+      const accountResult = await client.query(
+        `SELECT account_id, balance
+         FROM accounts
+         WHERE account_id = ANY($1::varchar[]) AND user_id = $2
+         ORDER BY account_id
+         FOR UPDATE`,
+        [accountIds, userId],
+      );
+
+      if (accountResult.rows.length !== accountIds.length) {
+        throw notFound('ACCOUNT_NOT_FOUND', 'Account not found.');
+      }
+
+      const categoryResult = await client.query(
+        `SELECT category_id
+         FROM categories
+         WHERE category_id = $1
+           AND type = $2
+           AND (user_id IS NULL OR user_id = $3)`,
+        [categoryId, type, userId],
+      );
+
+      if (categoryResult.rows.length === 0) {
+        const error = new Error('Category not found or does not match the transaction type.');
+        error.code = 'INVALID_CATEGORY';
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const updated = await client.query(
+        `UPDATE transactions
+         SET account_id = $1, category_id = $2, amount = $3, date = $4, type = $5, notes = $6
+         WHERE transaction_id = $7
+         RETURNING transaction_id, account_id, category_id, amount, date, type, notes, created_at`,
+        [accountId, categoryId, amount, date, type, notes, transactionId],
+      );
+
+      // Reverse the old effect, then apply the new one.
+      const balances = {};
+      const reversal = signedAmount(existing.type, existing.amount) * -1;
+      const reversed = await client.query(
+        'UPDATE accounts SET balance = balance + $1 WHERE account_id = $2 AND user_id = $3 RETURNING balance',
+        [reversal, existing.accountId, userId],
+      );
+      balances[existing.accountId] = Number(reversed.rows[0].balance);
+
+      const applied = await client.query(
+        'UPDATE accounts SET balance = balance + $1 WHERE account_id = $2 AND user_id = $3 RETURNING balance',
+        [signedAmount(type, amount), accountId, userId],
+      );
+      balances[accountId] = Number(applied.rows[0].balance);
+
+      await client.query('COMMIT');
+
+      return {
+        previous: existing,
+        transaction: mapTransaction(updated.rows[0]),
+        newBalance: balances[accountId],
+        previousAccountBalance: balances[existing.accountId],
+      };
+    } catch (error) {
+      await rollback(client, transactionStarted, 'Failed to roll back transaction update.');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteAndReverseBalance({ userId, transactionId }) {
+    const client = await this.db.getClient();
+    let transactionStarted = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      const existingResult = await client.query(
+        `SELECT transactions.transaction_id, transactions.account_id, transactions.category_id,
+                transactions.amount, transactions.date, transactions.type, transactions.notes,
+                transactions.created_at
+         FROM transactions
+         INNER JOIN accounts ON accounts.account_id = transactions.account_id
+         WHERE transactions.transaction_id = $1 AND accounts.user_id = $2
+         FOR UPDATE OF transactions`,
+        [transactionId, userId],
+      );
+
+      if (existingResult.rows.length === 0) {
+        throw notFound('TRANSACTION_NOT_FOUND', 'Transaction not found.');
+      }
+
+      const existing = mapTransaction(existingResult.rows[0]);
+
+      // Same lock order as an edit (transaction row first, then account) so a delete and
+      // an account-moving edit can never wait on each other.
+      await client.query(
+        'SELECT account_id FROM accounts WHERE account_id = $1 AND user_id = $2 FOR UPDATE',
+        [existing.accountId, userId],
+      );
+
+      await client.query('DELETE FROM transactions WHERE transaction_id = $1', [transactionId]);
+
+      const reversed = await client.query(
+        'UPDATE accounts SET balance = balance + $1 WHERE account_id = $2 AND user_id = $3 RETURNING balance',
+        [signedAmount(existing.type, existing.amount) * -1, existing.accountId, userId],
+      );
+
+      await client.query('COMMIT');
+
+      return { transaction: existing, newBalance: Number(reversed.rows[0].balance) };
+    } catch (error) {
+      await rollback(client, transactionStarted, 'Failed to roll back transaction deletion.');
       throw error;
     } finally {
       client.release();
