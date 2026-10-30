@@ -40,6 +40,8 @@ export function TransactionsPage() {
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [categoryError, setCategoryError] = useState('');
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [editingId, setEditingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const requestControllers = useRef(new Set());
@@ -145,28 +147,97 @@ export function TransactionsPage() {
         date,
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       };
-      const transaction = await api.post('/transactions', payload, {
+      const requestOptions = {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: controller.signal,
-      });
+      };
+      const transaction = editingId
+        ? await api.put(`/transactions/${editingId}`, payload, requestOptions)
+        : await api.post('/transactions', payload, requestOptions);
       if (controller.signal.aborted) return;
 
-      setTransactions((current) => sortTransactions([transaction, ...current]));
+      setTransactions((current) =>
+        sortTransactions([
+          transaction,
+          ...current.filter((item) => item.transactionId !== transaction.transactionId),
+        ]),
+      );
       setAccounts((current) =>
-        current.map((account) =>
-          account.accountId === transaction.accountId
-            ? { ...account, balance: transaction.newBalance }
-            : account,
-        ),
+        current.map((account) => {
+          if (account.accountId === transaction.accountId) {
+            return { ...account, balance: transaction.newBalance };
+          }
+          if (account.accountId === transaction.previousAccountId) {
+            return { ...account, balance: transaction.previousAccountBalance };
+          }
+          return account;
+        }),
       );
       setAmount('');
       setNotes('');
-      setNotice('Transaction recorded.');
+      setNotice(editingId ? 'Transaction updated.' : 'Transaction recorded.');
+      setEditingId(null);
     } catch (requestError) {
       if (!controller.signal.aborted) setError(requestError.message);
     } finally {
       requestControllers.current.delete(controller);
       if (!controller.signal.aborted) setSubmitting(false);
+    }
+  };
+
+  const startEditing = (transaction) => {
+    setError('');
+    setNotice('');
+    setEditingId(transaction.transactionId);
+    setType(transaction.type);
+    setAccountId(transaction.accountId);
+    setCategoryId(transaction.categoryId);
+    setAmount(String(transaction.amount));
+    setDate(transaction.date);
+    setNotes(transaction.notes || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setAmount('');
+    setNotes('');
+    setDate(localDate());
+  };
+
+  const handleDelete = async (transaction) => {
+    if (!accessToken) return;
+    if (!window.confirm('Delete this transaction? The account balance will be adjusted.')) return;
+
+    setDeletingId(transaction.transactionId);
+    setError('');
+    setNotice('');
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
+
+    try {
+      const result = await api.delete(`/transactions/${transaction.transactionId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+
+      setTransactions((current) =>
+        current.filter((item) => item.transactionId !== transaction.transactionId),
+      );
+      setAccounts((current) =>
+        current.map((account) =>
+          account.accountId === result.accountId
+            ? { ...account, balance: result.newBalance }
+            : account,
+        ),
+      );
+      if (editingId === transaction.transactionId) cancelEditing();
+      setNotice('Transaction deleted.');
+    } catch (requestError) {
+      if (!controller.signal.aborted) setError(requestError.message);
+    } finally {
+      requestControllers.current.delete(controller);
+      if (!controller.signal.aborted) setDeletingId(null);
     }
   };
 
@@ -241,8 +312,8 @@ export function TransactionsPage() {
         {notice && <p className="form-message success-message" role="status">{notice}</p>}
 
         {accessToken && (
-          <form aria-label="Record a transaction" className="transaction-form" onSubmit={handleSubmit}>
-            <h3>Record a transaction</h3>
+          <form aria-label={editingId ? 'Edit a transaction' : 'Record a transaction'} className="transaction-form" onSubmit={handleSubmit}>
+            <h3>{editingId ? 'Edit transaction' : 'Record a transaction'}</h3>
             <div className="transaction-form-grid">
               <label>
                 Type
@@ -328,8 +399,13 @@ export function TransactionsPage() {
               <p className="empty-state">No categories are available for this transaction type.</p>
             )}
             <button className="primary-button" disabled={!canSubmit || submitting || loading} type="submit">
-              {submitting ? 'Saving…' : 'Save transaction'}
+              {submitting ? 'Saving…' : editingId ? 'Update transaction' : 'Save transaction'}
             </button>
+            {editingId && (
+              <button className="secondary-button" disabled={submitting} onClick={cancelEditing} type="button">
+                Cancel edit
+              </button>
+            )}
           </form>
         )}
 
@@ -379,6 +455,7 @@ export function TransactionsPage() {
                     <th scope="col">Account</th>
                     <th scope="col">Date</th>
                     <th scope="col">Amount</th>
+                    <th scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -392,6 +469,26 @@ export function TransactionsPage() {
                       <td>{transaction.date}</td>
                       <td className={`transaction-amount ${transaction.type}`}>
                         {transaction.type === 'income' ? '+' : '−'}{formatAmount(transaction.amount)}
+                      </td>
+                      <td className="transaction-actions">
+                        <button
+                          aria-label={`Edit ${categoryNames.get(transaction.categoryId) || 'transaction'} on ${transaction.date}`}
+                          className="secondary-button"
+                          disabled={submitting || deletingId === transaction.transactionId}
+                          onClick={() => startEditing(transaction)}
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          aria-label={`Delete ${categoryNames.get(transaction.categoryId) || 'transaction'} on ${transaction.date}`}
+                          className="secondary-button"
+                          disabled={submitting || deletingId === transaction.transactionId}
+                          onClick={() => handleDelete(transaction)}
+                          type="button"
+                        >
+                          {deletingId === transaction.transactionId ? 'Deleting…' : 'Delete'}
+                        </button>
                       </td>
                     </tr>
                   ))}
