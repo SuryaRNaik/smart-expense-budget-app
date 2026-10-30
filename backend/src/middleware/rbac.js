@@ -42,8 +42,7 @@ const requireRole = (requiredRole) => {
   };
 };
 
-module.exports = {
-  requireRole,
-  normalizeRole,
-};
+module.exports = requireRole;
+module.exports.requireRole = requireRole;
+module.exports.normalizeRole = normalizeRole;
 
