@@ -1,6 +1,33 @@
 const reportRepository = require('./reportRepository');
 
+/**
+ * Helper to strictly validate YYYY-MM-DD format and prevent JS date normalization/rollover bugs.
+ */
+function isValidStrictDate(dateStr) {
+  if (typeof dateStr !== 'string') return false;
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!regex.test(dateStr)) return false;
+
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return false;
+
+  return d.toISOString().slice(0, 10) === dateStr;
+}
+
 async function getWeeklyReportData(userId, startDate, endDate) {
+  if (startDate && !isValidStrictDate(startDate)) {
+    const error = new Error('Invalid start date format. Use YYYY-MM-DD.');
+    error.status = 400;
+    error.code = 'INVALID_DATE_FORMAT';
+    throw error;
+  }
+  if (endDate && !isValidStrictDate(endDate)) {
+    const error = new Error('Invalid end date format. Use YYYY-MM-DD.');
+    error.status = 400;
+    error.code = 'INVALID_DATE_FORMAT';
+    throw error;
+  }
+
   const transactions = await reportRepository.getWeeklyTransactions(userId, startDate, endDate);
   
   let totalIncome = 0;
@@ -28,6 +55,13 @@ async function getWeeklyReportData(userId, startDate, endDate) {
 
 async function getMonthlyReportData(userId, year) {
   const targetYear = year || new Date().getFullYear();
+  if (year && !/^\d{4}$/.test(String(year))) {
+    const error = new Error('Invalid year format. Must be a 4-digit number.');
+    error.status = 400;
+    error.code = 'INVALID_YEAR_FORMAT';
+    throw error;
+  }
+
   const transactions = await reportRepository.getMonthlyTransactions(userId, targetYear);
 
   let totalIncome = 0;
@@ -73,10 +107,10 @@ async function getMonthlyReportData(userId, year) {
  * Period-over-period comparison (SEBM-F-042 / S2-11)
  */
 async function getPeriodComparisonData(userId, currentStart, currentEnd, prevStart, prevEnd) {
-  // Validate date format validity to prevent unhandled 500 server errors
+  // Validate strict date format and calendar correctness for all period parameters
   const dates = [currentStart, currentEnd, prevStart, prevEnd];
-  if (dates.some(d => !d || isNaN(new Date(d).getTime()))) {
-    const error = new Error('Invalid or missing date parameters provided.');
+  if (dates.some(d => !d || !isValidStrictDate(d))) {
+    const error = new Error('Invalid or missing date parameters provided. Dates must strictly follow YYYY-MM-DD.');
     error.status = 400;
     error.code = 'INVALID_DATE_FORMAT';
     throw error;
@@ -102,7 +136,6 @@ async function getPeriodComparisonData(userId, currentStart, currentEnd, prevSta
   const calcChange = (curr, prev) => {
     if (prev === 0) {
       if (curr === 0) return '0.00%';
-      // Fix: going from 0 to negative should reflect a negative trend (-100%), not positive (+100%)
       return curr > 0 ? '+100.00%' : '-100.00%';
     }
     const diff = curr - prev;

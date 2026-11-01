@@ -46,7 +46,7 @@ const generatePdf = (reportData, res) => {
     reportData.transactions.forEach((t, index) => {
       const dateStr = t.date ? new Date(t.date).toISOString().split('T')[0] : 'N/A';
       doc.fontSize(9).text(
-        `${index + 1}. [${dateStr}] ${t.type.toUpperCase()} - $${t.amount} | Category: ${t.category_name || 'N/A'} | Notes: ${t.notes || 'None'}`
+        `${index + 1}. [${dateStr}] ${t.type.toUpperCase()} $${t.amount} | Category: ${t.category_name || 'N/A'} | Notes: ${t.notes || 'None'}`
       );
     });
   }
@@ -68,7 +68,12 @@ router.get('/weekly', authenticateToken, async (req, res, next) => {
 
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) {
-      return res.status(400).json({ error: 'startDate and endDate are required query parameters.' });
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_PARAMETERS',
+          message: 'startDate and endDate are required query parameters.'
+        }
+      });
     }
 
     const report = await reportService.getWeeklyReportData(userId, startDate, endDate);
@@ -111,10 +116,27 @@ router.get('/export', authenticateToken, async (req, res, next) => {
     }
 
     const format = (req.query.format || 'csv').toLowerCase();
+    if (!['csv', 'pdf'].includes(format)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_FORMAT',
+          message: 'Unsupported format. Supported export formats are csv and pdf.'
+        }
+      });
+    }
+
     const { startDate, endDate, year } = req.query;
 
     let reportData;
-    if (startDate && endDate) {
+    if (startDate || endDate) {
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          error: {
+            code: 'MISSING_PARAMETERS',
+            message: 'Both startDate and endDate query parameters are required for date-range exports.'
+          }
+        });
+      }
       reportData = await reportService.getWeeklyReportData(userId, startDate, endDate);
     } else {
       reportData = await reportService.getMonthlyReportData(userId, year);
@@ -132,13 +154,6 @@ router.get('/export', authenticateToken, async (req, res, next) => {
       res.setHeader('Content-Disposition', 'attachment; filename="financial-report.pdf"');
       return generatePdf(reportData, res);
     }
-
-    return res.status(400).json({
-      error: {
-        code: 'INVALID_FORMAT',
-        message: 'Unsupported format. Supported export formats are csv and pdf.'
-      }
-    });
   } catch (err) {
     next(err);
   }
@@ -156,17 +171,16 @@ router.get('/comparison', authenticateToken, async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-const { currentStart, currentEnd, prevStart, prevEnd } = req.query;
+    const { currentStart, currentEnd, prevStart, prevEnd } = req.query;
 
-if (!currentStart || !currentEnd || !prevStart || !prevEnd) {
-  return res.status(400).json({
-    error: {
-      code: 'MISSING_PARAMETERS',
-      message:
-        'currentStart, currentEnd, prevStart, and prevEnd query parameters are required.',
-    },
-  });
-}
+    if (!currentStart || !currentEnd || !prevStart || !prevEnd) {
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_PARAMETERS',
+          message: 'currentStart, currentEnd, prevStart, and prevEnd query parameters are required.',
+        },
+      });
+    }
 
     const comparisonReport = await reportService.getPeriodComparisonData(
       userId, currentStart, currentEnd, prevStart, prevEnd

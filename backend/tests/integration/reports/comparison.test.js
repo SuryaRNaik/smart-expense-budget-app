@@ -33,9 +33,6 @@ describe('Period-over-Period Comparison API (SEBM-F-042 / TC-Rep-03)', () => {
       .get('/api/reports/comparison')
       .set('Authorization', authToken);
 
-    console.log('STATUS:', res.status);
-    console.log('BODY:', JSON.stringify(res.body, null, 2));
-
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
     expect(res.body.error.code).toBe('MISSING_PARAMETERS');
@@ -45,6 +42,18 @@ describe('Period-over-Period Comparison API (SEBM-F-042 / TC-Rep-03)', () => {
     const res = await request(app)
       .get(
         '/api/reports/comparison?currentStart=invalid-date&currentEnd=2026-10-31&prevStart=2026-09-01&prevEnd=2026-09-30'
+      )
+      .set('Authorization', authToken);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+    expect(res.body.error.code).toBe('INVALID_DATE_FORMAT');
+  });
+
+  it('should return 400 for invalid calendar dates (such as non-existent days like Feb 30)', async () => {
+    const res = await request(app)
+      .get(
+        '/api/reports/comparison?currentStart=2026-02-30&currentEnd=2026-03-31&prevStart=2026-01-01&prevEnd=2026-01-31'
       )
       .set('Authorization', authToken);
 
