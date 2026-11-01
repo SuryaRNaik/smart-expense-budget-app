@@ -62,6 +62,18 @@ describe('Period-over-Period Comparison API (SEBM-F-042 / TC-Rep-03)', () => {
     expect(res.body.error.code).toBe('INVALID_DATE_FORMAT');
   });
 
+  it('should return 400 if start date is after end date', async () => {
+    const res = await request(app)
+      .get(
+        '/api/reports/comparison?currentStart=2026-10-31&currentEnd=2026-10-01&prevStart=2026-09-01&prevEnd=2026-09-30'
+      )
+      .set('Authorization', authToken);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+    expect(res.body.error.code).toBe('INVALID_DATE_FORMAT');
+  });
+
   it('should calculate comparison metrics and correct variance direction for valid date ranges', async () => {
     const res = await request(app)
       .get(

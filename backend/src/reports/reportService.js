@@ -27,6 +27,12 @@ async function getWeeklyReportData(userId, startDate, endDate) {
     error.code = 'INVALID_DATE_FORMAT';
     throw error;
   }
+  if (startDate && endDate && startDate > endDate) {
+    const error = new Error('Invalid date range: startDate cannot be after endDate.');
+    error.status = 400;
+    error.code = 'INVALID_DATE_FORMAT';
+    throw error;
+  }
 
   const transactions = await reportRepository.getWeeklyTransactions(userId, startDate, endDate);
   
@@ -111,6 +117,14 @@ async function getPeriodComparisonData(userId, currentStart, currentEnd, prevSta
   const dates = [currentStart, currentEnd, prevStart, prevEnd];
   if (dates.some(d => !d || !isValidStrictDate(d))) {
     const error = new Error('Invalid or missing date parameters provided. Dates must strictly follow YYYY-MM-DD.');
+    error.status = 400;
+    error.code = 'INVALID_DATE_FORMAT';
+    throw error;
+  }
+
+  // Validate date ranges (start cannot be after end)
+  if (currentStart > currentEnd || prevStart > prevEnd) {
+    const error = new Error('Invalid date range: start date cannot be after end date.');
     error.status = 400;
     error.code = 'INVALID_DATE_FORMAT';
     throw error;

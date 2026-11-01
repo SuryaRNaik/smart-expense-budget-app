@@ -56,4 +56,24 @@ describe('Reports Export API (SEBM-F-041 / TC-Rep-02)', () => {
     expect(res.body.error).toBeDefined();
     expect(res.body.error.code).toBe('INVALID_FORMAT');
   });
+
+  it('should return 400 for export with invalid year format', async () => {
+    const res = await request(app)
+      .get('/api/reports/export?format=csv&year=invalid')
+      .set('Authorization', authToken);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+    expect(res.body.error.code).toBe('INVALID_YEAR_FORMAT');
+  });
+
+  it('should return 400 for export with missing date pair (only startDate provided)', async () => {
+    const res = await request(app)
+      .get('/api/reports/export?format=csv&startDate=2026-10-01')
+      .set('Authorization', authToken);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+    expect(res.body.error.code).toBe('MISSING_PARAMETERS');
+  });
 });

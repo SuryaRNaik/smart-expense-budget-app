@@ -139,6 +139,14 @@ router.get('/export', authenticateToken, async (req, res, next) => {
       }
       reportData = await reportService.getWeeklyReportData(userId, startDate, endDate);
     } else {
+      if (year && !/^\d{4}$/.test(String(year))) {
+        return res.status(400).json({
+          error: {
+            code: 'INVALID_YEAR_FORMAT',
+            message: 'Invalid year format. Must be a valid 4-digit year.'
+          }
+        });
+      }
       reportData = await reportService.getMonthlyReportData(userId, year);
     }
 
