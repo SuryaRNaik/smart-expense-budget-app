@@ -73,6 +73,15 @@ async function getMonthlyReportData(userId, year) {
  * Period-over-period comparison (SEBM-F-042 / S2-11)
  */
 async function getPeriodComparisonData(userId, currentStart, currentEnd, prevStart, prevEnd) {
+  // Validate date format validity to prevent unhandled 500 server errors
+  const dates = [currentStart, currentEnd, prevStart, prevEnd];
+  if (dates.some(d => !d || isNaN(new Date(d).getTime()))) {
+    const error = new Error('Invalid or missing date parameters provided.');
+    error.status = 400;
+    error.code = 'INVALID_DATE_FORMAT';
+    throw error;
+  }
+
   const currentTransactions = await reportRepository.getWeeklyTransactions(userId, currentStart, currentEnd);
   const prevTransactions = await reportRepository.getWeeklyTransactions(userId, prevStart, prevEnd);
 
@@ -91,7 +100,11 @@ async function getPeriodComparisonData(userId, currentStart, currentEnd, prevSta
   const previous = calculateTotals(prevTransactions);
 
   const calcChange = (curr, prev) => {
-    if (prev === 0) return curr === 0 ? '0.00%' : '+100.00%';
+    if (prev === 0) {
+      if (curr === 0) return '0.00%';
+      // Fix: going from 0 to negative should reflect a negative trend (-100%), not positive (+100%)
+      return curr > 0 ? '+100.00%' : '-100.00%';
+    }
     const diff = curr - prev;
     const pct = (diff / Math.abs(prev)) * 100;
     return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;

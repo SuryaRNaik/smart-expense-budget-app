@@ -156,12 +156,17 @@ router.get('/comparison', authenticateToken, async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { currentStart, currentEnd, prevStart, prevEnd } = req.query;
-    if (!currentStart || !currentEnd || !prevStart || !prevEnd) {
-      return res.status(400).json({
-        error: 'currentStart, currentEnd, prevStart, and prevEnd query parameters are required.'
-      });
-    }
+const { currentStart, currentEnd, prevStart, prevEnd } = req.query;
+
+if (!currentStart || !currentEnd || !prevStart || !prevEnd) {
+  return res.status(400).json({
+    error: {
+      code: 'MISSING_PARAMETERS',
+      message:
+        'currentStart, currentEnd, prevStart, and prevEnd query parameters are required.',
+    },
+  });
+}
 
     const comparisonReport = await reportService.getPeriodComparisonData(
       userId, currentStart, currentEnd, prevStart, prevEnd
