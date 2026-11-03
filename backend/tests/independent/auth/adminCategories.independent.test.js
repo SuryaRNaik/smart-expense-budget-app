@@ -123,8 +123,9 @@ describe('S2-04 admin category management', () => {
   test('IND-ADM-12 admin cannot edit or delete a user\'s custom category through the admin endpoints', async () => {
     const cname = nm('custom');
     const created = await h.request(app).post('/api/transactions/categories').set(A(userTok)).send({ name: cname, type: 'expense' });
+    expect([200, 201]).toContain(created.status);
     const row = await h.db.query('SELECT category_id FROM categories WHERE name=$1 AND user_id=$2', [cname, userId]);
-    if (!row.rows.length) { expect([200, 201]).toContain(created.status); return; }
+    expect(row.rows).toHaveLength(1); // setup must persist the custom category; fail explicitly instead of skipping
     const id = row.rows[0].category_id;
     expect((await h.request(app).put(`/api/admin/categories/${id}`).set(A(admin)).send({ name: 'hijack', type: 'expense' })).status).toBe(400);
     expect((await h.request(app).delete(`/api/admin/categories/${id}`).set(A(admin))).status).toBe(404);
