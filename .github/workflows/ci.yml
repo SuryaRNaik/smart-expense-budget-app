@@ -72,6 +72,9 @@ jobs:
       - name: Run independent tests
         run: npm run test:independent
 
+      - name: Run known-defect tests (expected-failure cases, not verification)
+        run: npx jest tests/known-defects --runInBand
+
   frontend-ci:
     name: Frontend CI
     runs-on: ubuntu-latest
