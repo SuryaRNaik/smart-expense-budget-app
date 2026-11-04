@@ -40,9 +40,13 @@ describe('TC-Acc-01 / SEBM-F-030 — Independent Account Creation & Listing Veri
   };
 
   afterAll(async () => {
-    if (createdUserIds.length > 0) {
-      // ON DELETE CASCADE automatically removes associated accounts and records
-      await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
+    try {
+      if (createdUserIds.length > 0) {
+        // ON DELETE CASCADE automatically removes associated accounts and records
+        await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
+      }
+    } finally {
+      await db.closePool();
     }
   });
 
