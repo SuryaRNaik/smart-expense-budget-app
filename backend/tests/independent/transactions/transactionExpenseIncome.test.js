@@ -69,8 +69,12 @@ describe('TC-Exp-01 / SEBM-F-010 — Independent Expense & Income Transaction Ve
   };
 
   afterAll(async () => {
-    if (createdUserIds.length > 0) {
-      await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
+    try {
+      if (createdUserIds.length > 0) {
+        await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
+      }
+    } finally {
+      await db.closePool();
     }
   });
 
@@ -363,7 +367,73 @@ describe('TC-Exp-01 / SEBM-F-010 — Independent Expense & Income Transaction Ve
     });
   });
 
-  describe('Security, Ownership Protection & Atomicity', () => {
+  describe('PostgreSQL Transaction Atomicity & Rollback Guarantee', () => {
+    it('TC-Exp-01-ROLL-01: genuine rollback where transaction insert succeeds but subsequent account balance update fails', async () => {
+      const user = await createTestUserWithAccount('RollbackSim', 1000.0);
+      const accountId = user.account.accountId;
+
+      // Attach a temporary conditional PostgreSQL trigger on accounts that throws an exception
+      // during UPDATE for this specific account, after the transaction INSERT has already executed.
+      const triggerFuncName = `fail_account_update_${testRunId}`;
+      const triggerName = `trg_fail_account_update_${testRunId}`;
+
+      await db.query(`
+        CREATE OR REPLACE FUNCTION ${triggerFuncName}()
+        RETURNS trigger AS $$
+        BEGIN
+          IF NEW.account_id = '${accountId}' THEN
+            RAISE EXCEPTION 'Simulated failure during account balance update step';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+
+      await db.query(`
+        CREATE TRIGGER ${triggerName}
+        BEFORE UPDATE ON accounts
+        FOR EACH ROW EXECUTE FUNCTION ${triggerFuncName}();
+      `);
+
+      try {
+        // Attempt creating transaction via HTTP API
+        const res = await request(app)
+          .post('/api/transactions')
+          .set('Authorization', `Bearer ${user.token}`)
+          .send({
+            accountId,
+            categoryId: predefinedExpenseCategoryId,
+            amount: 150.0,
+            date: '2026-10-25',
+            type: 'expense',
+            notes: 'Rollback test note',
+          });
+
+        // The endpoint should fail with 500 because the balance update threw in the database transaction
+        expect(res.status).toBe(500);
+
+        // Verify that the transaction INSERT was completely rolled back in PostgreSQL
+        const dbTxns = await db.query(
+          'SELECT * FROM transactions WHERE account_id = $1',
+          [accountId]
+        );
+        expect(dbTxns.rows.length).toBe(0);
+
+        // Verify that the account balance remains strictly unchanged at 1000.00
+        const dbAcc = await db.query(
+          'SELECT balance FROM accounts WHERE account_id = $1',
+          [accountId]
+        );
+        expect(Number(dbAcc.rows[0].balance)).toBe(1000.0);
+      } finally {
+        // Clean up temporary database trigger and function
+        await db.query(`DROP TRIGGER IF EXISTS ${triggerName} ON accounts;`);
+        await db.query(`DROP FUNCTION IF EXISTS ${triggerFuncName}();`);
+      }
+    });
+  });
+
+  describe('Security, Ownership Protection & Authentication', () => {
     it('TC-Exp-01-SEC-01: prevents User B from posting transactions to User A account (cross-user violation)', async () => {
       const userA = await createTestUserWithAccount('UserA', 1000.0);
       const userB = await createTestUserWithAccount('UserB', 500.0);
@@ -419,13 +489,34 @@ describe('TC-Exp-01 / SEBM-F-010 — Independent Expense & Income Transaction Ve
       expect(resB.body.transactions.length).toBe(0);
     });
 
-    it('TC-Exp-01-AUTH-01: rejects unauthenticated requests with 401', async () => {
+    it('TC-Exp-01-AUTH-01: rejects unauthenticated requests with 401 MISSING_AUTHORIZATION', async () => {
       const res = await request(app).get('/api/transactions');
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('MISSING_AUTHORIZATION');
     });
 
-    it('TC-Exp-01-AUTH-02: rejects expired tokens with 401', async () => {
+    it('TC-Exp-01-AUTH-02: rejects request with non-Bearer token scheme with 401 INVALID_AUTHORIZATION', async () => {
+      const res = await request(app)
+        .get('/api/transactions')
+        .set('Authorization', 'Basic dXNlcjpwYXNz');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('INVALID_AUTHORIZATION');
+    });
+
+    it('TC-Exp-01-AUTH-03: rejects forged/tampered bearer tokens with 401 INVALID_TOKEN', async () => {
+      const forgedToken = jwt.sign(
+        { userId: 'fake_attacker', role: 'user', tokenType: 'access' },
+        'unauthorized-secret-key-12345678901234567890'
+      );
+
+      const res = await request(app)
+        .get('/api/transactions')
+        .set('Authorization', `Bearer ${forgedToken}`);
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('INVALID_TOKEN');
+    });
+
+    it('TC-Exp-01-AUTH-04: rejects expired tokens with 401 INVALID_TOKEN', async () => {
       const expiredToken = jwt.sign(
         { userId: 'usr_expired', role: 'user', tokenType: 'access' },
         config.jwtSecret,
