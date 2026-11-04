@@ -42,6 +42,7 @@ describe('TC-Exp-04 / SEBM-F-013 — Independent Custom Categories Verification'
     if (createdUserIds.length > 0) {
       await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
     }
+    await db.closePool();
   });
 
   describe('AC-SEBM-F-013 Core Requirements (Create Custom Category & Use in Transactions)', () => {
@@ -280,8 +281,10 @@ describe('TC-Exp-04 / SEBM-F-013 — Independent Custom Categories Verification'
       expect(attackRes.status).toBe(400);
       expect(attackRes.body.error.code).toBe('INVALID_CATEGORY');
     });
+  });
 
-    it('TC-Exp-04-AUTH-01: rejects unauthenticated requests to category endpoints with 401', async () => {
+  describe('Authentication Enforcement', () => {
+    it('TC-Exp-04-AUTH-01: rejects unauthenticated requests to category endpoints with 401 MISSING_AUTHORIZATION', async () => {
       const getRes = await request(app).get('/api/transactions/categories');
       expect(getRes.status).toBe(401);
       expect(getRes.body.error.code).toBe('MISSING_AUTHORIZATION');
@@ -293,7 +296,42 @@ describe('TC-Exp-04 / SEBM-F-013 — Independent Custom Categories Verification'
       expect(postRes.body.error.code).toBe('MISSING_AUTHORIZATION');
     });
 
-    it('TC-Exp-04-AUTH-02: rejects category creation with expired token with 401', async () => {
+    it('TC-Exp-04-AUTH-02: rejects request with non-Bearer token scheme with 401 INVALID_AUTHORIZATION', async () => {
+      const getRes = await request(app)
+        .get('/api/transactions/categories')
+        .set('Authorization', 'Basic dXNlcjpwYXNzd29yZA==');
+      expect(getRes.status).toBe(401);
+      expect(getRes.body.error.code).toBe('INVALID_AUTHORIZATION');
+
+      const postRes = await request(app)
+        .post('/api/transactions/categories')
+        .set('Authorization', 'Basic dXNlcjpwYXNzd29yZA==')
+        .send({ name: 'Basic Auth Cat', type: 'expense' });
+      expect(postRes.status).toBe(401);
+      expect(postRes.body.error.code).toBe('INVALID_AUTHORIZATION');
+    });
+
+    it('TC-Exp-04-AUTH-03: rejects forged or tampered bearer tokens with 401 INVALID_TOKEN', async () => {
+      const forgedToken = jwt.sign(
+        { userId: 'usr_forged_cat', role: 'user', tokenType: 'access' },
+        'completely_wrong_secret_123456789'
+      );
+
+      const getRes = await request(app)
+        .get('/api/transactions/categories')
+        .set('Authorization', `Bearer ${forgedToken}`);
+      expect(getRes.status).toBe(401);
+      expect(getRes.body.error.code).toBe('INVALID_TOKEN');
+
+      const postRes = await request(app)
+        .post('/api/transactions/categories')
+        .set('Authorization', `Bearer ${forgedToken}`)
+        .send({ name: 'Forged Cat', type: 'expense' });
+      expect(postRes.status).toBe(401);
+      expect(postRes.body.error.code).toBe('INVALID_TOKEN');
+    });
+
+    it('TC-Exp-04-AUTH-04: rejects category creation with expired token with 401 INVALID_TOKEN', async () => {
       const expiredToken = jwt.sign(
         { userId: 'usr_expired', role: 'user', tokenType: 'access' },
         config.jwtSecret,
