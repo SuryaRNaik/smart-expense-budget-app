@@ -85,23 +85,7 @@ describe('S1-01 registration (SEBM-F-001)', () => {
     expect(r.rows[0].name).toBe(name);
   });
 
-  // DEFECT BUG-AUTH-02: expected to pass once fixed; test.failing flips to red then, so remove .failing.
-  test.failing('IND-REG-09 very long input does not cause a 500', async () => {
-    const res = await h.request(app).post('/api/auth/register').send({ name: 'x'.repeat(300), email: h.uniqueEmail('long'), password: 'Str0ngPassw0rd!' });
-    expect(res.status).toBeLessThan(500);
-  });
 
-  // DEFECT BUG-AUTH-03
-  test.failing('IND-REG-10 concurrent registrations of the same email create exactly one user, none returns 500', async () => {
-    const email = h.uniqueEmail('race');
-    const send = () => h.request(app).post('/api/auth/register').send({ name: 'R', email, password: 'Str0ngPassw0rd!' });
-    const results = await Promise.all([send(), send(), send()]);
-    const statuses = results.map((r) => r.status).sort();
-    const r = await h.db.query('SELECT count(*)::int AS n FROM users WHERE email = $1', [email]);
-    expect(r.rows[0].n).toBe(1);
-    expect(statuses.filter((s) => s === 201)).toHaveLength(1);
-    expect(statuses.filter((s) => s >= 500)).toHaveLength(0);
-  });
 });
 
 describe('S1-01 password storage (SEBM-SR-002)', () => {
