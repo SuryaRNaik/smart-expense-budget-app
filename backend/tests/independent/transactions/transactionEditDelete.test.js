@@ -67,6 +67,7 @@ describe('TC-Exp-02 / SEBM-F-011 — Independent Transaction Edit & Delete Verif
     if (createdUserIds.length > 0) {
       await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
     }
+    await db.closePool();
   });
 
   describe('AC-SEBM-F-011 Core Requirements (Edit Transaction & Balance Reversal)', () => {
@@ -274,6 +275,88 @@ describe('TC-Exp-02 / SEBM-F-011 — Independent Transaction Edit & Delete Verif
     });
   });
 
+  describe('AC-SEBM-F-011 Report Verification (/api/reports/weekly)', () => {
+    it('TC-Exp-02-REP-01: weekly report immediately reflects transaction edit and subsequent deletion', async () => {
+      const user = await createTestUserWithAccounts('ReportSync', [2000.0]);
+      const accountId = user.accounts[0].accountId;
+      const targetDate = '2026-10-21';
+      const startDate = '2026-10-19';
+      const endDate = '2026-10-25';
+
+      // 1. Initially, user has no transactions in this date range
+      const initialRep = await request(app)
+        .get(`/api/reports/weekly?startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(initialRep.status).toBe(200);
+      expect(Number(initialRep.body.totalExpense)).toBe(0);
+      expect(initialRep.body.transactionCount).toBe(0);
+
+      // 2. Create initial expense transaction: 120.00
+      const createRes = await request(app)
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 120.0,
+          date: targetDate,
+          type: 'expense',
+          notes: 'Groceries before edit',
+        });
+      const txnId = createRes.body.transactionId || createRes.body.transaction?.transactionId;
+
+      // Report immediately reflects 120.00 expense
+      const repAfterCreate = await request(app)
+        .get(`/api/reports/weekly?startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(repAfterCreate.status).toBe(200);
+      expect(Number(repAfterCreate.body.totalExpense)).toBe(120.0);
+      expect(Number(repAfterCreate.body.netSavings)).toBe(-120.0);
+      expect(repAfterCreate.body.transactionCount).toBe(1);
+      expect(repAfterCreate.body.transactions[0].transaction_id).toBe(txnId);
+
+      // 3. Edit the transaction amount to 275.50
+      const editRes = await request(app)
+        .put(`/api/transactions/${txnId}`)
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 275.5,
+          date: targetDate,
+          type: 'expense',
+          notes: 'Groceries edited amount',
+        });
+      expect(editRes.status).toBe(200);
+
+      // Report immediately reflects edited amount 275.50
+      const repAfterEdit = await request(app)
+        .get(`/api/reports/weekly?startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(repAfterEdit.status).toBe(200);
+      expect(Number(repAfterEdit.body.totalExpense)).toBe(275.5);
+      expect(Number(repAfterEdit.body.netSavings)).toBe(-275.5);
+      expect(repAfterEdit.body.transactionCount).toBe(1);
+      expect(Number(repAfterEdit.body.transactions[0].amount)).toBe(275.5);
+
+      // 4. Delete the transaction
+      const delRes = await request(app)
+        .delete(`/api/transactions/${txnId}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(delRes.status).toBe(200);
+
+      // Report immediately reflects deletion: 0.00 expense, 0 transactions
+      const repAfterDel = await request(app)
+        .get(`/api/reports/weekly?startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(repAfterDel.status).toBe(200);
+      expect(Number(repAfterDel.body.totalExpense)).toBe(0);
+      expect(Number(repAfterDel.body.netSavings)).toBe(0);
+      expect(repAfterDel.body.transactionCount).toBe(0);
+      expect(repAfterDel.body.transactions).toHaveLength(0);
+    });
+  });
+
   describe('Validation & Boundary Enforcement on Edit', () => {
     it('TC-Exp-02-VAL-01: rejects invalid amount or date on edit and preserves original record and balance', async () => {
       const user = await createTestUserWithAccounts('EditVal', [500.0]);
@@ -425,8 +508,78 @@ describe('TC-Exp-02 / SEBM-F-011 — Independent Transaction Edit & Delete Verif
     });
   });
 
+  describe('Authentication Enforcement (PUT & DELETE)', () => {
+    it('TC-Exp-02-AUTH-01: rejects PUT and DELETE without token with 401 MISSING_AUTHORIZATION', async () => {
+      const resPut = await request(app)
+        .put('/api/transactions/txn_test_auth_123')
+        .send({ amount: 50.0 });
+      expect(resPut.status).toBe(401);
+      expect(resPut.body.error.code).toBe('MISSING_AUTHORIZATION');
+
+      const resDel = await request(app).delete('/api/transactions/txn_test_auth_123');
+      expect(resDel.status).toBe(401);
+      expect(resDel.body.error.code).toBe('MISSING_AUTHORIZATION');
+    });
+
+    it('TC-Exp-02-AUTH-02: rejects PUT and DELETE with non-Bearer scheme with 401 INVALID_AUTHORIZATION', async () => {
+      const resPut = await request(app)
+        .put('/api/transactions/txn_test_auth_123')
+        .set('Authorization', 'Basic dXNlcjpwYXNz')
+        .send({ amount: 50.0 });
+      expect(resPut.status).toBe(401);
+      expect(resPut.body.error.code).toBe('INVALID_AUTHORIZATION');
+
+      const resDel = await request(app)
+        .delete('/api/transactions/txn_test_auth_123')
+        .set('Authorization', 'Basic dXNlcjpwYXNz');
+      expect(resDel.status).toBe(401);
+      expect(resDel.body.error.code).toBe('INVALID_AUTHORIZATION');
+    });
+
+    it('TC-Exp-02-AUTH-03: rejects forged or tampered bearer tokens with 401 INVALID_TOKEN', async () => {
+      const forgedToken = jwt.sign(
+        { userId: 'usr_forged_999', role: 'user' },
+        'completely_wrong_secret_key_123456789'
+      );
+
+      const resPut = await request(app)
+        .put('/api/transactions/txn_test_auth_123')
+        .set('Authorization', `Bearer ${forgedToken}`)
+        .send({ amount: 50.0 });
+      expect(resPut.status).toBe(401);
+      expect(resPut.body.error.code).toBe('INVALID_TOKEN');
+
+      const resDel = await request(app)
+        .delete('/api/transactions/txn_test_auth_123')
+        .set('Authorization', `Bearer ${forgedToken}`);
+      expect(resDel.status).toBe(401);
+      expect(resDel.body.error.code).toBe('INVALID_TOKEN');
+    });
+
+    it('TC-Exp-02-AUTH-04: rejects expired tokens with 401 INVALID_TOKEN', async () => {
+      const expiredToken = jwt.sign(
+        { userId: 'usr_expired_999', role: 'user' },
+        config.jwtSecret,
+        { expiresIn: '-10s' }
+      );
+
+      const resPut = await request(app)
+        .put('/api/transactions/txn_test_auth_123')
+        .set('Authorization', `Bearer ${expiredToken}`)
+        .send({ amount: 50.0 });
+      expect(resPut.status).toBe(401);
+      expect(resPut.body.error.code).toBe('INVALID_TOKEN');
+
+      const resDel = await request(app)
+        .delete('/api/transactions/txn_test_auth_123')
+        .set('Authorization', `Bearer ${expiredToken}`);
+      expect(resDel.status).toBe(401);
+      expect(resDel.body.error.code).toBe('INVALID_TOKEN');
+    });
+  });
+
   describe('Concurrency & Data Integrity Verification', () => {
-    it('TC-Exp-02-CONC-01: concurrent operations do not corrupt account balance or duplicate deletions', async () => {
+    it('TC-Exp-02-CONC-01: concurrent deletions do not corrupt account balance or duplicate deletions', async () => {
       const user = await createTestUserWithAccounts('ConcurrencyTest', [2000.0]);
       const accountId = user.accounts[0].accountId;
 
@@ -466,6 +619,154 @@ describe('TC-Exp-02 / SEBM-F-011 — Independent Transaction Edit & Delete Verif
       // Transactions count must be 0
       const dbTxns = await db.query('SELECT COUNT(*) FROM transactions WHERE account_id = $1', [accountId]);
       expect(Number(dbTxns.rows[0].count)).toBe(0);
+    });
+
+    it('TC-Exp-02-CONC-02: concurrent edits against different transactions on the same account preserve exact balance', async () => {
+      const user = await createTestUserWithAccounts('ConcurrentEdits', [1000.0]);
+      const accountId = user.accounts[0].accountId;
+
+      // Create Txn 1: 100.00 expense
+      const res1 = await request(app)
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 100.0,
+          date: '2026-10-25',
+          type: 'expense',
+        });
+      const txn1Id = res1.body.transactionId || res1.body.transaction?.transactionId;
+
+      // Create Txn 2: 100.00 expense
+      const res2 = await request(app)
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 100.0,
+          date: '2026-10-25',
+          type: 'expense',
+        });
+      const txn2Id = res2.body.transactionId || res2.body.transaction?.transactionId;
+
+      // Account balance after both: 1000 - 100 - 100 = 800.00
+      const midAcc = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [accountId]);
+      expect(Number(midAcc.rows[0].balance)).toBe(800.0);
+
+      // Concurrently edit Txn 1 to 200.00 and Txn 2 to 300.00
+      // Expected total expenses: 200 + 300 = 500.00
+      // Expected final account balance: 1000 - 500 = 500.00
+      const editPromises = [
+        request(app)
+          .put(`/api/transactions/${txn1Id}`)
+          .set('Authorization', `Bearer ${user.token}`)
+          .send({
+            accountId,
+            categoryId: predefinedExpenseCategoryId,
+            amount: 200.0,
+            date: '2026-10-25',
+            type: 'expense',
+          }),
+        request(app)
+          .put(`/api/transactions/${txn2Id}`)
+          .set('Authorization', `Bearer ${user.token}`)
+          .send({
+            accountId,
+            categoryId: predefinedExpenseCategoryId,
+            amount: 300.0,
+            date: '2026-10-25',
+            type: 'expense',
+          }),
+      ];
+
+      const responses = await Promise.all(editPromises);
+      expect(responses[0].status).toBe(200);
+      expect(responses[1].status).toBe(200);
+
+      // Final balance in PostgreSQL must be exactly 500.00
+      const finalAcc = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [accountId]);
+      expect(Number(finalAcc.rows[0].balance)).toBe(500.0);
+
+      // Both transactions in database must match edited amounts
+      const dbTxn1 = await db.query('SELECT amount FROM transactions WHERE transaction_id = $1', [txn1Id]);
+      const dbTxn2 = await db.query('SELECT amount FROM transactions WHERE transaction_id = $1', [txn2Id]);
+      expect(Number(dbTxn1.rows[0].amount)).toBe(200.0);
+      expect(Number(dbTxn2.rows[0].amount)).toBe(300.0);
+    });
+
+    it('TC-Exp-02-CONC-03: concurrent edit-versus-delete scenario maintains database and balance consistency', async () => {
+      const user = await createTestUserWithAccounts('EditVsDel', [1000.0]);
+      const accountId = user.accounts[0].accountId;
+
+      // Txn A: 100.00 expense
+      const resA = await request(app)
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 100.0,
+          date: '2026-10-25',
+          type: 'expense',
+        });
+      const txnAId = resA.body.transactionId || resA.body.transaction?.transactionId;
+
+      // Txn B: 150.00 expense
+      const resB = await request(app)
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          accountId,
+          categoryId: predefinedExpenseCategoryId,
+          amount: 150.0,
+          date: '2026-10-25',
+          type: 'expense',
+        });
+      const txnBId = resB.body.transactionId || resB.body.transaction?.transactionId;
+
+      // Balance before concurrent ops: 1000 - 100 - 150 = 750.00
+      const midAcc = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [accountId]);
+      expect(Number(midAcc.rows[0].balance)).toBe(750.0);
+
+      // Concurrently:
+      // Edit Txn A: change amount from 100.00 to 200.00 (debits extra 100.00)
+      // Delete Txn B: deletes 150.00 expense (credits back 150.00)
+      // Net change: -100.00 + 150.00 = +50.00
+      // Final balance: 750.00 + 50.00 = 800.00
+      const ops = [
+        request(app)
+          .put(`/api/transactions/${txnAId}`)
+          .set('Authorization', `Bearer ${user.token}`)
+          .send({
+            accountId,
+            categoryId: predefinedExpenseCategoryId,
+            amount: 200.0,
+            date: '2026-10-25',
+            type: 'expense',
+          }),
+        request(app)
+          .delete(`/api/transactions/${txnBId}`)
+          .set('Authorization', `Bearer ${user.token}`),
+      ];
+
+      const [editRes, delRes] = await Promise.all(ops);
+      expect(editRes.status).toBe(200);
+      expect(delRes.status).toBe(200);
+
+      // Balance in PostgreSQL must be exactly 800.00
+      const finalAcc = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [accountId]);
+      expect(Number(finalAcc.rows[0].balance)).toBe(800.0);
+
+      // Txn A remains in DB with amount 200.00
+      const dbTxnA = await db.query('SELECT amount FROM transactions WHERE transaction_id = $1', [txnAId]);
+      expect(dbTxnA.rows.length).toBe(1);
+      expect(Number(dbTxnA.rows[0].amount)).toBe(200.0);
+
+      // Txn B removed from DB
+      const dbTxnB = await db.query('SELECT * FROM transactions WHERE transaction_id = $1', [txnBId]);
+      expect(dbTxnB.rows.length).toBe(0);
     });
   });
 });
