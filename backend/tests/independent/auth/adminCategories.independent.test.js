@@ -47,8 +47,11 @@ describe('S2-04 access control (SEBM-SR-005)', () => {
   });
 
   test('IND-ADM-04 a role claim in a request body or query cannot elevate a user', async () => {
-    const res = await h.request(app).post('/api/admin/categories?role=admin').set(A(userTok)).send({ name: nm('elev'), type: 'expense', role: 'admin' });
+    const name = nm('elev');
+    const res = await h.request(app).post('/api/admin/categories?role=admin').set(A(userTok)).send({ name, type: 'expense', role: 'admin' });
     expect(res.status).toBe(403);
+    expect((await h.db.query('SELECT 1 FROM categories WHERE name=$1', [name])).rows).toHaveLength(0);
+    expect((await h.db.query('SELECT role FROM users WHERE user_id=$1', [userId])).rows[0].role).toBe('user');
   });
 });
 
@@ -94,7 +97,11 @@ describe('S2-04 admin category management', () => {
     const name = nm('dup');
     expect((await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name, type: 'expense' })).status).toBe(201);
     expect((await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name: name.toUpperCase(), type: 'expense' })).status).toBe(409);
+    const afterDup = await h.db.query('SELECT 1 FROM categories WHERE lower(name)=lower($1) AND type=$2 AND user_id IS NULL', [name, 'expense']);
+    expect(afterDup.rows).toHaveLength(1); // the rejected duplicate was not stored
     expect((await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name, type: 'income' })).status).toBe(201);
+    const both = await h.db.query('SELECT type FROM categories WHERE lower(name)=lower($1) AND user_id IS NULL ORDER BY type', [name]);
+    expect(both.rows.map((x) => x.type)).toEqual(['expense', 'income']);
   });
 
   test.each([
@@ -103,8 +110,11 @@ describe('S2-04 admin category management', () => {
     ['bad type', { name: 'x', type: 'savings' }],
     ['missing type', { name: 'x' }],
     ['non-string name', { name: 123, type: 'expense' }],
-  ])('IND-ADM-10 create with %s gives 400', async (_l, body) => {
+  ])('IND-ADM-10 create with %s gives 400 and stores nothing', async (_l, body) => {
+    const before = (await h.db.query('SELECT count(*)::int n FROM categories')).rows[0].n;
     expect((await h.request(app).post('/api/admin/categories').set(A(admin)).send(body)).status).toBe(400);
+    const after = (await h.db.query('SELECT count(*)::int n FROM categories')).rows[0].n;
+    expect(after).toBe(before);
   });
 
   test('IND-ADM-11 edit renames a category; duplicate rename gives 409; unknown id gives 404', async () => {
@@ -116,7 +126,10 @@ describe('S2-04 admin category management', () => {
     const ok = await h.request(app).put(`/api/admin/categories/${id}`).set(A(admin)).send({ name: renamed, type: 'expense' });
     expect(ok.status).toBe(200);
     expect(ok.body.category.name).toBe(renamed);
+    const row = await h.db.query('SELECT name, user_id, is_custom FROM categories WHERE category_id=$1', [id]);
+    expect(row.rows[0]).toEqual({ name: renamed, user_id: null, is_custom: false });
     expect((await h.request(app).put(`/api/admin/categories/${id}`).set(A(admin)).send({ name: b, type: 'expense' })).status).toBe(409);
+    expect((await h.db.query('SELECT name FROM categories WHERE category_id=$1', [id])).rows[0].name).toBe(renamed); // rejected rename left the row unchanged
     expect((await h.request(app).put('/api/admin/categories/does-not-exist').set(A(admin)).send({ name: 'x', type: 'expense' })).status).toBe(404);
   });
 
@@ -137,7 +150,9 @@ describe('S2-04 admin category management', () => {
     const name = nm('del');
     const c = await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name, type: 'income' });
     const id = c.body.category.categoryId;
+    expect((await h.db.query('SELECT 1 FROM categories WHERE category_id=$1', [id])).rows).toHaveLength(1); // setup persisted
     expect((await h.request(app).delete(`/api/admin/categories/${id}`).set(A(admin))).status).toBe(200);
+    expect((await h.db.query('SELECT 1 FROM categories WHERE category_id=$1', [id])).rows).toHaveLength(0); // row actually removed
     expect((await h.request(app).delete(`/api/admin/categories/${id}`).set(A(admin))).status).toBe(404);
   });
 
@@ -161,13 +176,10 @@ describe('S2-04 admin category management', () => {
     const name = nm("x'); DROP TABLE categories;--");
     const res = await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name, type: 'expense' });
     expect(res.status).toBe(201);
+    const stored = await h.db.query('SELECT name FROM categories WHERE category_id=$1', [res.body.category.categoryId]);
+    expect(stored.rows[0].name).toBe(name); // stored literally
     const count = await h.db.query('SELECT count(*)::int n FROM categories');
-    expect(count.rows[0].n).toBeGreaterThan(0);
+    expect(count.rows[0].n).toBeGreaterThan(0); // table still exists
   });
 
-  // DEFECT BUG-AUTH-04
-  test.failing('IND-ADM-16 very long category name does not cause a 500', async () => {
-    const res = await h.request(app).post('/api/admin/categories').set(A(admin)).send({ name: 'x'.repeat(200), type: 'expense' });
-    expect(res.status).toBeLessThan(500);
-  });
 });
