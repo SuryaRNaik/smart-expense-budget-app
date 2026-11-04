@@ -59,6 +59,7 @@ describe('TC-Acc-02 / SEBM-F-031 — Independent Account Transfer Verification',
     if (createdUserIds.length > 0) {
       await db.query('DELETE FROM users WHERE user_id = ANY($1)', [createdUserIds]);
     }
+    await db.closePool();
   });
 
   describe('AC-SEBM-F-031 Core Requirements (Debit, Credit & Balance Conservation)', () => {
@@ -243,7 +244,43 @@ describe('TC-Acc-02 / SEBM-F-031 — Independent Account Transfer Verification',
       expect(Number(dbTo.rows[0].balance)).toBe(100.0);
     });
 
-    it('TC-Acc-02-AUTH-01: rejects unauthenticated transfer requests with 401', async () => {
+    it('TC-Acc-02-SEC-02: transfer where destination account belongs to another user is rejected and preserves balances', async () => {
+      const userA = await createTestUserWithTwoAccounts('SenderA', 1000.0, 500.0);
+      const userB = await createTestUserWithTwoAccounts('ReceiverB', 700.0, 300.0);
+
+      // User A attempts to transfer 250.00 from User A's source account to User B's account
+      const res = await request(app)
+        .post('/api/accounts/transfer')
+        .set('Authorization', `Bearer ${userA.token}`)
+        .send({
+          fromAccountId: userA.fromAccount.accountId,
+          toAccountId: userB.fromAccount.accountId,
+          amount: 250.0,
+        });
+
+      // Must fail with 404 ACCOUNT_NOT_FOUND (user cannot transfer to accounts not in their ownership)
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('ACCOUNT_NOT_FOUND');
+
+      // User A source account balance must remain unchanged at 1000.00
+      const dbFromA = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [userA.fromAccount.accountId]);
+      expect(Number(dbFromA.rows[0].balance)).toBe(1000.0);
+
+      // User B account balance must remain unchanged at 700.00
+      const dbFromB = await db.query('SELECT balance FROM accounts WHERE account_id = $1', [userB.fromAccount.accountId]);
+      expect(Number(dbFromB.rows[0].balance)).toBe(700.0);
+
+      // No transfer record should exist in transfers table
+      const dbTransfers = await db.query(
+        'SELECT COUNT(*) FROM transfers WHERE from_account_id = $1 OR to_account_id = $2',
+        [userA.fromAccount.accountId, userB.fromAccount.accountId]
+      );
+      expect(Number(dbTransfers.rows[0].count)).toBe(0);
+    });
+  });
+
+  describe('Authentication Enforcement', () => {
+    it('TC-Acc-02-AUTH-01: rejects unauthenticated transfer requests with 401 MISSING_AUTHORIZATION', async () => {
       const res = await request(app)
         .post('/api/accounts/transfer')
         .send({ fromAccountId: 'acc_1', toAccountId: 'acc_2', amount: 50.0 });
@@ -252,7 +289,32 @@ describe('TC-Acc-02 / SEBM-F-031 — Independent Account Transfer Verification',
       expect(res.body.error.code).toBe('MISSING_AUTHORIZATION');
     });
 
-    it('TC-Acc-02-AUTH-02: rejects transfer request with expired token with 401', async () => {
+    it('TC-Acc-02-AUTH-02: rejects transfer request with non-Bearer token scheme with 401 INVALID_AUTHORIZATION', async () => {
+      const res = await request(app)
+        .post('/api/accounts/transfer')
+        .set('Authorization', 'Basic dXNlcjpwYXNzd29yZA==')
+        .send({ fromAccountId: 'acc_1', toAccountId: 'acc_2', amount: 50.0 });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('INVALID_AUTHORIZATION');
+    });
+
+    it('TC-Acc-02-AUTH-03: rejects forged or tampered bearer tokens with 401 INVALID_TOKEN', async () => {
+      const forgedToken = jwt.sign(
+        { userId: 'usr_forged_xfer', role: 'user', tokenType: 'access' },
+        'completely_wrong_secret_123456789'
+      );
+
+      const res = await request(app)
+        .post('/api/accounts/transfer')
+        .set('Authorization', `Bearer ${forgedToken}`)
+        .send({ fromAccountId: 'acc_1', toAccountId: 'acc_2', amount: 50.0 });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('INVALID_TOKEN');
+    });
+
+    it('TC-Acc-02-AUTH-04: rejects transfer request with expired token with 401 INVALID_TOKEN', async () => {
       const expiredToken = jwt.sign(
         { userId: 'usr_expired', role: 'user', tokenType: 'access' },
         config.jwtSecret,
