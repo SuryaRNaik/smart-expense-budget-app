@@ -31,13 +31,13 @@ describe('TC-Perf-01 performance summary', () => {
 
   it('fails when p90 exceeds the configured response-time limit', () => {
     const samples = [
-      ...Array.from({ length: 9 }, () => ({ ok: true, durationMs: 800 })),
-      { ok: true, durationMs: 2500 },
+      ...Array.from({ length: 8 }, () => ({ ok: true, durationMs: 800 })),
+      ...Array.from({ length: 2 }, () => ({ ok: true, durationMs: 2500 })),
     ];
 
     const summary = summarizeSamples(samples, 2000, 90);
 
-    expect(summary.passingPercent).toBe(90);
+    expect(summary.passingPercent).toBe(80);
     expect(summary.p90Ms).toBe(2500);
     expect(summary.passed).toBe(false);
   });
