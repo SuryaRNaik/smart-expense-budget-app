@@ -183,6 +183,8 @@ async function main() {
     requests,
     concurrency,
     timeoutMs,
+    maxResponseTimeMs,
+    minPassingPercent,
   });
 
   const passed = loadSummary.passed && saveSummary.passed;
