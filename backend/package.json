@@ -12,7 +12,7 @@
     "test:independent": "jest tests/independent --runInBand --passWithNoTests",
     "db:migrate": "node src/db/migrate.js",
     "nfr:perf": "node scripts/nfr/performance-smoke.js",
-    "test:nfr": "jest tests/unit/nfr*.test.js --runInBand"
+    "test:nfr": "jest --runInBand --runTestsByPath tests/unit/nfrPerformance.test.js tests/unit/nfrSecurityConfig.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
