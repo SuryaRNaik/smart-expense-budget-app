@@ -108,7 +108,7 @@ async function sendRequest(url, method, headers, body, timeoutMs) {
   }
 }
 
-async function runBatch({ label, url, method, headers, body, requests, concurrency, timeoutMs }) {
+async function runBatch({ label, url, method, headers, body, requests, concurrency, timeoutMs, maxResponseTimeMs, minPassingPercent }) {
   const samples = new Array(requests);
   let nextIndex = 0;
 
@@ -124,7 +124,7 @@ async function runBatch({ label, url, method, headers, body, requests, concurren
   const workers = Array.from({ length: Math.min(concurrency, requests) }, () => worker());
   await Promise.all(workers);
 
-  const summary = summarizeSamples(samples);
+  const summary = summarizeSamples(samples, maxResponseTimeMs, minPassingPercent);
   console.log(JSON.stringify({ label, url, method, ...summary }, null, 2));
   return summary;
 }
@@ -169,6 +169,8 @@ async function main() {
     requests,
     concurrency,
     timeoutMs,
+    maxResponseTimeMs,
+    minPassingPercent,
   });
 
   headers['Content-Type'] = 'application/json';
