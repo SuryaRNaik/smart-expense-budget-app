@@ -218,7 +218,9 @@ describe('TC-Exp-04 / SEBM-F-013 — Independent Custom Categories Verification'
         .post('/api/transactions/categories')
         .set('Authorization', `Bearer ${user.token}`)
         .send({ name: catName, type: 'expense' });
-      expect([400, 409, 500]).toContain(res2.status);
+      expect([400, 409]).toContain(res2.status);
+      expect(res2.body.error).toBeDefined();
+      expect(res2.body.error.code).toBe('CATEGORY_EXISTS');
     });
   });
 
